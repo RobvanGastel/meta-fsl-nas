@@ -29,7 +29,7 @@ do
         # examples per class
         --n $N \
         # number classes
-        --k 20 \
+        --k 5 \
         # test examples per class
         --q 1 \
 

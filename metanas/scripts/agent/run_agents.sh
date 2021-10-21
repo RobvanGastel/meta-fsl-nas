@@ -12,7 +12,7 @@ WARM_UP_EPOCHS=0
 SEEDS=(2)
 SEEDS_TWO=(1)
 EVAL_FREQ=50
-N=1
+N=3
 DS=omniglot
 
 echo "Start run of ablation studies, variables epochs = ${EPOCHS}, warm up variables = ${WARM_UP_EPOCHS}, seeds = ${SEEDS[@]}, dataset = ${DS}"

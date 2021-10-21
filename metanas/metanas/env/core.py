@@ -593,8 +593,13 @@ class NasEnv(gym.Env):
         y_pred = self.meta_predictor.evaluate_architecture(
             dataset, graph
         )
-        print(y_pred.item())
-        return y_pred.item()
+
+        # Final output layer is Tanh, so
+        y_pred = y_pred.item()
+        x_min, x_max = -1, 1
+        acc = (y_pred - x_min)/(x_max - x_min)
+
+        return acc
 
 
 def decode_metad2a_to_igraph(row):
