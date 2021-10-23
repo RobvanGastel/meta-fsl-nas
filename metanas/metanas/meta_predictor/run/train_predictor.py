@@ -1,48 +1,15 @@
 import os
-import igraph
 import argparse
 
 import torch
 
-from metanas.meta_predictor.loader import MetaTestDataset
 from metanas.meta_predictor.meta_predictor import MetaPredictor
 from metanas.utils import utils
-
-
-def decode_metad2a_to_igraph(row):
-    if isinstance(row, str):
-        row = eval(row)  # convert string to list of lists
-    n = len(row)
-
-    g = igraph.Graph(directed=True)
-    g.add_vertices(n)
-
-    for i, node in enumerate(row):
-        g.vs[i]['type'] = node[0]
-
-        if i < (n - 2) and i > 0:
-            g.add_edge(i, i + 1)  # always connect from last node
-        for j, edge in enumerate(node[1:]):
-            if edge == 1:
-                g.add_edge(j, i)
-    return g, n
 
 
 def main(config):
     meta_pred = MetaPredictor(config)
     meta_pred.meta_train()
-
-    # dataset = MetaTestDataset(
-    #     config.data_path,
-    #     'mnist',
-    #     config.num_samples,
-    #     config.num_class)
-
-    # m = "[[0], [6, 1], [4, 1, 0], [3, 0, 1, 0], [4, 1, 0, 0, 0], [3, 0, 1, 0, 0, 0], [3, 0, 0, 1, 1, 0, 0], [1, 0, 0, 0, 0, 1, 1, 1]]"
-    # graph, _ = decode_metad2a_to_igraph(m)
-
-    # y_pred = meta_pred.evaluate_architecture(dataset[0], graph)
-    # print(y_pred)
 
 
 if __name__ == "__main__":

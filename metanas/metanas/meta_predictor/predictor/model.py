@@ -16,9 +16,12 @@ class PredictorModel(nn.Module):
         self.nvt = args.nvt  # number of vertex types
         self.START_TYPE = graph_config['START_TYPE']
         self.END_TYPE = graph_config['END_TYPE']
-        self.hs = args.hs  # hidden state size of each vertex
+
+        self.hs = 512
+
+        # self.hs = args.hs  # hidden state size of each vertex
         self.nz = args.nz  # size of latent representation z
-        self.gs = args.hs  # size of graph state
+        self.gs = self.hs  # size of graph state
         self.bidir = True  # whether to use bidirectional encoding
         self.vid = True
         self.device = args.device
@@ -30,6 +33,10 @@ class PredictorModel(nn.Module):
             # vertex state size = hidden state + vid
         else:
             self.vs = self.hs
+
+        print(self.vs)
+        print(self.gs)
+        print(self.nz)
 
         # 0. encoding-related
         self.grue_forward = nn.GRUCell(self.nvt, self.hs)  # encoder GRU

@@ -76,6 +76,7 @@ do
         --agent_update_every 20 \
         --agent_update_after 400 \
 
+        --rew_model_path /home/rob/Git/ckpt_max_corr.pt \
         --use_rew_estimation
     )
 
