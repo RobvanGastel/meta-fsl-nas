@@ -58,7 +58,6 @@ class MetaTrainDatabase(Dataset):
         self.acc = data['acc']
         self.task = data['task']
         self.graph = data['graph']
-        # print(self.graph[0], self.graph[0].is_weighted())
 
         random_idx_lst = torch.load(idx_path)
         self.idx_lst = {}

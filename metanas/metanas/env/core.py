@@ -1,13 +1,18 @@
-import torch
-import torch.nn.functional as F
-import torch.nn as nn
-import numpy as np
-
-import gym
 import math
 import time
 import igraph
+
+import numpy as np
+
+import gym
 from gym import spaces
+
+import torch
+import torch.nn.functional as F
+import torch.nn as nn
+
+from torchvision import transforms
+import torchvision.models as models
 
 from metanas.meta_predictor.meta_predictor import MetaPredictor
 import metanas.utils.genotypes as gt
@@ -40,6 +45,11 @@ class NasEnv(gym.Env):
         # Task reward estimator
         if self.reward_estimation:
             self.meta_predictor = MetaPredictor(config)
+
+            # remove last fully-connected layer
+            model = models.resnet18(pretrained=True).eval()
+            self.feature_extractor = torch.nn.Sequential(
+                *list(model.children())[:-1])
 
         # The task is set in the meta-loop
         self.current_task = None
@@ -546,6 +556,24 @@ class NasEnv(gym.Env):
 
     def _meta_predictor_estimation(self, task):
 
+        graph = self._meta_predictor_graph_preprocess()
+        dataset = self._meta_predictor_dataset_preprocess(task)
+
+        # Evaluate on the MetaD2A predictor
+        y_pred = self.meta_predictor.evaluate_architecture(
+            dataset, graph
+        )
+
+        # Final output layer is Tanh, so map the range
+        y_pred = y_pred.item()
+        print(y_pred)
+
+        x_min, x_max = -1, 1
+        acc = (y_pred - x_min)/(x_max - x_min)
+
+        return acc
+
+    def _meta_predictor_graph_preprocess(self):
         # TODO: Use genotype function from meta_model possibly
         geno = parse(self.normalized_alphas, k=2,
                      primitives=gt.PRIMITIVES_NAS_BENCH_201)
@@ -581,25 +609,32 @@ class NasEnv(gym.Env):
         edges.append(stop_node)
 
         graph, _ = decode_metad2a_to_igraph(edges)
+        return graph
+
+    def _meta_predictor_dataset_preprocess(self, task):
 
         # Get num_samples, n_train * k
         # TODO: Should be testing dataset?
         train_y, _ = next(iter(task.train_loader))
-        assert train_y.shape[0] == self.config.num_samples, "Number of samples should equal training of meta_predictor"
+        assert train_y.shape[0] == self.config.num_samples, \
+            "Number of samples should equal training of meta_predictor"
 
-        # TODO: Double check paper (32x32)
-        dataset = F.interpolate(train_y, size=(32, 16)).view(-1, 512)
+        # Shape the image as (3, 32, 32)
+        dataset = F.interpolate(train_y, size=(32, 32))
 
-        y_pred = self.meta_predictor.evaluate_architecture(
-            dataset, graph
-        )
+        # Make sure there are 3 channels
+        if self.config.dataset == "omniglot" or \
+                self.config.dataset == "triplemnist":
+            dataset = dataset.repeat(1, 3, 1, 1)
 
-        # Final output layer is Tanh, so
-        y_pred = y_pred.item()
-        x_min, x_max = -1, 1
-        acc = (y_pred - x_min)/(x_max - x_min)
+        # Normalize the features
+        # TODO: Configurable
+        mean = torch.tensor([0.1307])
+        std = torch.tensor([0.3081])
+        dataset = dataset.sub_(mean).div_(std)
 
-        return acc
+        # Extracts features by ResNet18
+        return self.feature_extractor(dataset)
 
 
 def decode_metad2a_to_igraph(row):
