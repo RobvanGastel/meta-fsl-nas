@@ -7,8 +7,8 @@ from torch.utils.tensorboard import SummaryWriter
 from metanas.meta_optimizer.agents.utils.logx import EpochLogger
 
 
-class NAS_agent(ABC):
-    """Force same interface for all agents for MetaNAS
+class base_agent(ABC):
+    """Same interface for all agents for MetaNAS
     """
 
     def __init__(self, config, env, epochs, steps_per_epoch,
@@ -46,7 +46,7 @@ class NAS_agent(ABC):
         return
 
 
-class RL_agent(NAS_agent):
+class RL_agent(base_agent):
     def __init__(self, config, env, epochs, steps_per_epoch,
                  num_test_episodes, logger_kwargs,
                  seed, gamma, lr, batch_size,

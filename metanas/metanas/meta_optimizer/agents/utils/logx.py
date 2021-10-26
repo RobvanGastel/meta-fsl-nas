@@ -15,7 +15,7 @@ import atexit
 import os
 import warnings
 
-from metanas.env.core import NasEnv
+from metanas.env.nas import NasEnv
 from metanas.meta_optimizer.agents.utils.mpi_tools import proc_id, mpi_statistics_scalar
 from metanas.meta_optimizer.agents.utils.serialization_utils import convert_json
 

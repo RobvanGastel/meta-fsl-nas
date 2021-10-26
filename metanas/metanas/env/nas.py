@@ -1,4 +1,5 @@
 import math
+import copy
 import time
 import igraph
 
@@ -81,7 +82,7 @@ class NasEnv(gym.Env):
         action_size = len(self.A) + 2*len(self. primitives) + 1
         self.action_space = spaces.Discrete(action_size)
 
-        # TODO: Store best alphas/or model obtained yet,
+        # Store best alphas/or model obtained yet,
         self.max_alphas = []
         self.max_acc = 0.0
 
@@ -120,17 +121,23 @@ class NasEnv(gym.Env):
         """The meta-loop passes the task for the environment to solve"""
         print("Set new task for environment")
         self.current_task = task
-        self.meta_state = meta_state
+        self.meta_state = copy.deepcopy(meta_state)
 
         self.reset()
 
         # Reset best alphas and accuracy for current trial
         self.max_acc = 0.0
 
-        # TODO: Check celltype
         self.max_alphas = []
-        for _, row in enumerate(self.meta_model.alpha_normal):
-            self.max_alphas.append(row)
+        if self.cell_type == "normal":
+            for _, row in enumerate(self.meta_model.alpha_normal):
+                self.max_alphas.append(row.to(self.config.device))
+        elif self.cell_type == "reduce":
+            for _, row in enumerate(self.meta_model.alpha_reduce):
+                self.max_alphas.append(row.to(self.config.device))
+
+        else:
+            raise RuntimeError(f"Cell type {self.cell_type} is not supported.")
 
     def initialize_observation_space(self):
         # Generate the internal states of the graph
@@ -247,10 +254,16 @@ class NasEnv(gym.Env):
 
             # Set the meta-model, update the env state in
             # self.update_states()
-            with torch.no_grad():
-                self.meta_model.alpha_normal[
-                    row_idx][edge_idx] = self._inverse_softmax(
-                    curr_edge, C)
+            if self.cell_type == "normal":
+                with torch.no_grad():
+                    self.meta_model.alpha_normal[
+                        row_idx][edge_idx] = self._inverse_softmax(
+                        curr_edge, C)
+            elif self.cell_type == "reduce":
+                with torch.no_grad():
+                    self.meta_model.alpha_reduce[
+                        row_idx][edge_idx] = self._inverse_softmax(
+                        curr_edge, C)
 
             # True if state is mutated
             return True
@@ -279,10 +292,16 @@ class NasEnv(gym.Env):
             with torch.no_grad():
                 curr_edge += 0.01
 
-            with torch.no_grad():
-                self.meta_model.alpha_normal[
-                    row_idx][edge_idx] = self._inverse_softmax(
-                    curr_edge, C)
+            if self.cell_type == "normal":
+                with torch.no_grad():
+                    self.meta_model.alpha_normal[
+                        row_idx][edge_idx] = self._inverse_softmax(
+                        curr_edge, C)
+            elif self.cell_type == "reduce":
+                with torch.no_grad():
+                    self.meta_model.alpha_reduce[
+                        row_idx][edge_idx] = self._inverse_softmax(
+                        curr_edge, C)
 
             # True if state is mutated
             return True
@@ -298,15 +317,16 @@ class NasEnv(gym.Env):
         """
 
         if self.cell_type == "normal":
-
-            # TODO: Pass probability
             if increase:
                 return self.increase_op(row_idx, edge_idx, op_idx)
             else:
                 return self.decrease_op(row_idx, edge_idx, op_idx)
 
         elif self.cell_type == "reduce":
-            raise NotImplementedError("Only normal cell is working")
+            if increase:
+                return self.increase_op(row_idx, edge_idx, op_idx)
+            else:
+                return self.decrease_op(row_idx, edge_idx, op_idx)
 
         else:
             raise RuntimeError(f"Cell type {self.cell_type} is not supported.")
@@ -337,10 +357,15 @@ class NasEnv(gym.Env):
             if self.max_acc < acc:
                 self.max_acc = acc
 
-                # TODO: Check celltype
-                self.max_alphas = []
-                for _, row in enumerate(self.meta_model.alpha_normal):
-                    self.max_alphas.append(row.to(self.config.device))
+                if self.cell_type == "normal":
+                    for _, row in enumerate(self.meta_model.alpha_normal):
+                        self.max_alphas.append(row.to(self.config.device))
+                elif self.cell_type == "reduce":
+                    for _, row in enumerate(self.meta_model.alpha_reduce):
+                        self.max_alphas.append(row.to(self.config.device))
+                else:
+                    raise RuntimeError(
+                        f"Cell type {self.cell_type} is not supported.")
 
         # The final step time
         end = time.time()
@@ -502,7 +527,7 @@ class NasEnv(gym.Env):
         # [0, 1]
         reward = 0
 
-        print(self.baseline_acc, accuracy)
+        # print(self.baseline_acc, accuracy)
 
         # Else, the reward is 0
         if self.baseline_acc == accuracy:
@@ -564,14 +589,13 @@ class NasEnv(gym.Env):
             dataset, graph
         )
 
-        # Final output layer is Tanh, so map the range
         y_pred = y_pred.item()
         print(y_pred)
 
-        x_min, x_max = -1, 1
-        acc = (y_pred - x_min)/(x_max - x_min)
+        # x_min, x_max = -1, 1
+        # acc = (y_pred - x_min)/(x_max - x_min)
 
-        return acc
+        return y_pred
 
     def _meta_predictor_graph_preprocess(self):
         # TODO: Use genotype function from meta_model possibly
@@ -582,7 +606,8 @@ class NasEnv(gym.Env):
         # n_edges = sum([len(x) for x in geno])
         edges = []
 
-        # TODO: Intermediary solution
+        # All networks have transformed edge => node,
+        # node => edge the adjacency matrix is,
         connections = [[1],
                        [1, 0],
                        [0, 1, 0],

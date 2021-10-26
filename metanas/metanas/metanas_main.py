@@ -19,7 +19,7 @@ from metanas.utils import utils
 from metanas.utils.cosine_power_annealing import cosine_power_annealing
 from metanas.meta_optimizer.agents.Random.random import RandomAgent
 from metanas.meta_optimizer.agents.SAC.rl2_sac import SAC
-from metanas.env.core import NasEnv
+from metanas.env.nas import NasEnv
 
 
 """ Script for metanas & baseline trainings
@@ -496,9 +496,9 @@ def train(
     env_normal = NasEnv(config, meta_model,
                         cell_type="normal",
                         reward_estimation=config.use_rew_estimation)
-    # env_reduce = NasEnv(config, meta_model,
-    #                     cell_type="reduce",
-    #                     reward_estimation=config.use_rew_estimation)
+    env_reduce = NasEnv(config, meta_model,
+                        cell_type="reduce",
+                        reward_estimation=config.use_rew_estimation)
 
     for meta_epoch in range(config.start_epoch, config.meta_epochs + 1):
 
@@ -526,19 +526,23 @@ def train(
 
             # Set few-shot task
             env_normal.set_task(task, meta_state)
-            # env_reduce.set_task(task)
+            env_reduce.set_task(task, meta_state)
 
             # Now optimize alphas for better initialization
             meta_rl_agent.train_agent(env_normal)
-            # meta_rl_agent.train_agent(env_reduce)
+            meta_rl_agent.train_agent(env_reduce)
 
             # In warm-up don't change the alphas
             if meta_epoch <= config.warm_up_epochs:
                 meta_model.load_state_dict(meta_state)
             else:
-                # TODO: Obtain better meta_model state for task-learning
+                # Obtain better meta_model state for task-learning
                 # and set.
                 normal_alphas = env_normal.get_max_alphas()
+                reduce_alphas = env_reduce.get_max_alphas()
+
+                meta_model.alpha_normal = normal_alphas
+                meta_model.alpha_normal = reduce_alphas
 
             task_infos += [
                 task_optimizer.step(
@@ -1147,13 +1151,12 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # TODO: Make configureable
     # num_samples in few-shot setting, n*k
     args.num_samples = 20
     # the graph data used, nas-bench-201
     args.graph_data_name = 'nasbench201'
     args.nvt = 7
-    args.hs = 56
+    args.hs = 512
     args.nz = 56
 
     args.path = os.path.join(
