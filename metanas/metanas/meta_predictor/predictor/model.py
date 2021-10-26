@@ -17,9 +17,7 @@ class PredictorModel(nn.Module):
         self.START_TYPE = graph_config['START_TYPE']
         self.END_TYPE = graph_config['END_TYPE']
 
-        self.hs = 512
-
-        # self.hs = args.hs  # hidden state size of each vertex
+        self.hs = args.hs  # hidden state size of each vertex
         self.nz = args.nz  # size of latent representation z
         self.gs = self.hs  # size of graph state
         self.bidir = True  # whether to use bidirectional encoding
@@ -33,10 +31,6 @@ class PredictorModel(nn.Module):
             # vertex state size = hidden state + vid
         else:
             self.vs = self.hs
-
-        print(self.vs)
-        print(self.gs)
-        print(self.nz)
 
         # 0. encoding-related
         self.grue_forward = nn.GRUCell(self.nvt, self.hs)  # encoder GRU
@@ -102,6 +96,16 @@ class PredictorModel(nn.Module):
             nn.Tanh(),
             nn.Linear(self.hs, 1)
         )
+
+        # TODO: Paper describes an output of
+        # Linear, Relu => Linear Relu
+        self.acc_fc = nn.Sequential(
+            nn.Linear(input_dim, self.hs),
+            nn.ReLU(),
+            nn.Linear(self.hs, 1),
+            nn.ReLU()
+        )
+
         self.mseloss = nn.MSELoss(reduction='sum')
 
     def predict(self, D_mu, G_mu):
@@ -112,7 +116,11 @@ class PredictorModel(nn.Module):
             input_vec.append(G_mu)
 
         input_vec = torch.cat(input_vec, dim=1)
-        return self.pred_fc(input_vec)
+
+        # return self.pred_fc(input_vec)
+        # TODO: Adjusted to range (0, 1)
+
+        return self.acc_fc(input_vec)
 
     def get_device(self):
         if self.device is None:

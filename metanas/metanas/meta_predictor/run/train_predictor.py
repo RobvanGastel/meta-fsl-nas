@@ -68,6 +68,9 @@ if __name__ == "__main__":
     args.gpus = utils.parse_gpus(args.gpus)
     args.device = torch.device("cuda")
 
+    args.use_rew_estimation = False
+    args.model_path = None
+
     # Logging
     logger = utils.get_logger(os.path.join(args.path, f"{args.name}.log"))
     args.logger = logger

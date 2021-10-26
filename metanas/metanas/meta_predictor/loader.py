@@ -87,10 +87,11 @@ class MetaTrainDatabase(Dataset):
             ridx = torch.randperm(len(cx))
             data.append(cx[ridx[:self.num_samples]])
         x = torch.cat(data)
-        if self.acc_norm:
-            acc = ((acc - self.mean) / self.std) / 100.0
-        else:
-            acc = acc / 100.0
+        # TODO: Commented normalization
+        # if self.acc_norm:
+        #     acc = ((acc - self.mean) / self.std) / 100.0
+        # else:
+        acc = acc / 100.0
         return x, graph, acc
 
 

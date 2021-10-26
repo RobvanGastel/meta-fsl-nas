@@ -9,9 +9,9 @@ args=(
 	--seed 1 \
 	--gpus 0 \
 
-	--path '/home/rob/Git/meta-fsl-nas/metanas/results/predictor' \
+	--path '/home/rob/Git/meta-fsl-nas/metanas/results/predictor_acc' \
 	--data_path '/home/rob/Git/meta-fsl-nas/data/predictor' \
-	--save_path '/home/rob/Git/meta-fsl-nas/metanas/results/predictor' \
+	--save_path '/home/rob/Git/meta-fsl-nas/metanas/results/predictor_acc' \
 
 	--epochs 400 \
 
@@ -19,7 +19,7 @@ args=(
 	--num_class 5 \
 	--num_samples 20 \
 
-	--hs 56 \
+	--hs 512 \
 	--nz 56 \
 )
 

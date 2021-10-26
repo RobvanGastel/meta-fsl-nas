@@ -4,6 +4,8 @@
 # Datasets, ICLR 2021
 ###############################################################################
 
+import os
+
 import numpy as np
 from tqdm import tqdm
 from scipy.stats import pearsonr
@@ -11,6 +13,7 @@ from scipy.stats import pearsonr
 import torch
 from torch import optim
 
+from torch.utils.tensorboard import SummaryWriter
 from metanas.meta_predictor.predictor.model import PredictorModel
 from metanas.meta_predictor.utils import (load_graph_config,
                                           load_pretrained_model,
@@ -24,9 +27,9 @@ class MetaPredictor:
         self.device = self.config.device
         self.num_samples = config.num_samples
 
-        # self.logger = config.logger
+        self.logger = config.logger
         self.meta_test = config.use_rew_estimation
-        self.max_corr_dict = {'corr': -1, 'epoch': -1}
+        self.max_corr_dict = {'corr': 0, 'epoch': 0, 'loss': -1}
 
         # Test when used as discrete estimate on the RL environment
         # TODO: Stoch or discrete sampling
@@ -53,8 +56,9 @@ class MetaPredictor:
             # Load predictor model
             self.model = PredictorModel(config, graph_config).to(self.device)
 
+            # TODO: Fix model path set
             # If model path is given, load pretrained model
-            if self.model_path is not None:
+            if config.model_path is not None:
                 load_pretrained_model(self.model_path, self.model)
 
             self.epochs = config.epochs
@@ -79,8 +83,14 @@ class MetaPredictor:
                 self.device,
                 is_pred=True)
 
-            self.acc_mean = self.mtrloader.dataset.mean
-            self.acc_std = self.mtrloader.dataset.std
+            # During meta-training log to tensorboard
+            log_dir = os.path.join(self.save_path, "log")
+            self.summary_writer = SummaryWriter(
+                log_dir=log_dir, flush_secs=1)
+
+            # Used to normalize the accuracy
+            # self.acc_mean = self.mtrloader.dataset.mean
+            # self.acc_std = self.mtrloader.dataset.std
 
     def forward(self, dataset, arch):
         D_mu = self.model.set_encode(dataset.to(self.device))
@@ -95,10 +105,16 @@ class MetaPredictor:
 
             # self.config.logger print pred log train
             self.logger.info(
-                f"Train epoch: {epoch:3d} "
+                f"Train epoch:{epoch:3d} \n"
                 f"meta-training loss: {loss:.6f} "
                 f"meta-training correlation: {corr:.4f}"
             )
+
+            # Logging to tensorboard
+            self.summary_writer.add_scalar(
+                'meta-training/loss', loss, epoch)
+            self.summary_writer.add_scalar(
+                'meta-training/corr', corr, epoch)
 
             valoss, vacorr = self.meta_validation()
             if self.max_corr_dict['corr'] < vacorr:
@@ -111,10 +127,16 @@ class MetaPredictor:
             max_loss = self.max_corr_dict['loss']
             max_corr = self.max_corr_dict['corr']
             self.logger.info(
-                f"Validation epoch: {epoch:3d} "
-                f"validation loss: {loss:.6f} ({max_loss:.6f}) "
-                f"max correlation correlation: {corr:.4f} ({max_corr:.4f})"
+                f"Validation epoch:{epoch:3d} \n"
+                f"validation loss: {valoss:.6f} ({max_loss:.6f}) "
+                f"max validation correlation: {vacorr:.4f} ({max_corr:.4f})"
             )
+
+            # Logging to tensorboard
+            self.summary_writer.add_scalar(
+                'meta-validation/loss', valoss, epoch)
+            self.summary_writer.add_scalar(
+                'meta-validation/corr', vacorr, epoch)
 
             if epoch % self.save_epoch == 0:
                 save_model(self.save_path, self.model, epoch)
