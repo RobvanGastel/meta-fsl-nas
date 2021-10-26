@@ -414,7 +414,6 @@ class TripleMNISTFewShot(TorchmetaTaskDistribution):
     """Class to create triple MNIST-based tasks for meta learning"""
 
     def __init__(self, config, download=False):
-        # TODO: Originally 1, 84
         super().__init__(config, 1, 28, download)
 
         self.train_loader = create_triplemnist_data_loader(

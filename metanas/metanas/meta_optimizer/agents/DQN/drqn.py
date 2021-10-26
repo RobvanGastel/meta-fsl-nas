@@ -227,7 +227,6 @@ class DRQN(RL_agent):
         # Bellman backup equation
         expected_q_value = rew + self.gamma * next_q_value * (1 - done)
 
-        # TODO: Possibility of different losses
         loss = F.smooth_l1_loss(q_value, expected_q_value)
         # loss = ((q_value - expected_q_value)**2).mean()
 

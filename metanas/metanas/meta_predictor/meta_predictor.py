@@ -32,7 +32,6 @@ class MetaPredictor:
         self.max_corr_dict = {'corr': 0, 'epoch': 0, 'loss': -1}
 
         # Test when used as discrete estimate on the RL environment
-        # TODO: Stoch or discrete sampling
         if self.meta_test:
             self.model_path = config.rew_model_path
             self.data_path = config.rew_data_path
@@ -56,7 +55,6 @@ class MetaPredictor:
             # Load predictor model
             self.model = PredictorModel(config, graph_config).to(self.device)
 
-            # TODO: Fix model path set
             # If model path is given, load pretrained model
             if config.model_path is not None:
                 load_pretrained_model(self.model_path, self.model)

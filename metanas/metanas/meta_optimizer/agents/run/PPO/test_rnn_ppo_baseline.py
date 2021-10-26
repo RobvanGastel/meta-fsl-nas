@@ -11,7 +11,7 @@ from stable_baselines import PPO2
 
 
 if __name__ == "__main__":
-    # TODO: Garage implements RL2 instead of LSTM-PPO
+    # Garage implements RL2 instead of LSTM-PPO
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=42, help="random seed")
     parser.add_argument("--use_pomdp", action="store_true",

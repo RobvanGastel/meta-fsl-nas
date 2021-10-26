@@ -6,11 +6,9 @@ import itertools
 import numpy as np
 
 import torch
-from torch.utils.tensorboard import SummaryWriter
 from torch.optim import Adam
 
 from metanas.meta_optimizer.agents.agent import RL_agent
-from metanas.meta_optimizer.agents.utils.logx import EpochLogger
 from metanas.meta_optimizer.agents.SAC.core import GRUActorCritic, count_vars
 
 

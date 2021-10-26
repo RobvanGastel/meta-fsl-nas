@@ -1,9 +1,13 @@
 import time
 
-from metanas.meta_optimizer.agents.agent import NAS_agent
+from metanas.meta_optimizer.agents.agent import base_agent
+
+# TODO: Refactor random search follow
+# Random search and reproducibility for neural architecture search
+# https://arxiv.org/abs/1902.07638
 
 
-class RandomAgent(NAS_agent):
+class RandomAgent(base_agent):
     def __init__(self, config, env, epochs, steps_per_epoch,
                  num_test_episodes, logger_kwargs=dict()):
         super().__init__(config, env, epochs, steps_per_epoch,
