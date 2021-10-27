@@ -34,7 +34,8 @@ class base_agent(ABC):
         self.logger.save_config(locals())
 
         self.summary_writer = SummaryWriter(
-            log_dir=logger_kwargs['output_dir'], flush_secs=1)
+            log_dir=logger_kwargs['output_dir'],
+            flush_secs=1)
 
     def train_agent(self):
         """Agent mutates the DARTS alphas based on the given

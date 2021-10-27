@@ -3,8 +3,9 @@ import copy
 from enum import Enum
 
 import cv2
-
 import numpy as np
+
+from gym import spaces
 
 
 class Color(Enum):
@@ -244,12 +245,21 @@ class KrazyGridWorld:
                  num_steps_before_energy_needed=11, energy_replenish=8,
                  energy_sq_perc=0.05, num_transporters=1,
                  sparse_rewards=True,
-                 image_obs=True, use_local_obs=False):
+                 image_obs=True, use_local_obs=False, max_ep_len=100):
 
         if task_seed is None:
             task_seed = seed
 
         self.task_rng = np.random.RandomState(task_seed)
+
+        # Max episode length
+        self.max_ep_len = max_ep_len
+
+        self.observation_space = spaces.Box(
+            0, 9,
+            shape=(100,),
+            dtype=np.int32)
+        self.action_space = spaces.Discrete(4)
 
         self.one_hot_obs = one_hot_obs
         self.image_obs = image_obs
@@ -484,12 +494,15 @@ def run_grid():
                         death_square_percentage=0.08,
                         num_steps_before_energy_needed=50, energy_sq_perc=0.05,
                         energy_replenish=8, num_transporters=1,
-                        ice_sq_perc=0.05,
+                        ice_sq_perc=0.05, max_ep_len=100
                         )
 
     for i in range(1000):
         o, r, d, _ = kw.step(np.random.randint(0, 4, 1), render=True)
-        obs = kw.get_state_obs()
+
+        # Redundant?
+        # obs = kw.get_state_obs()
+
         if d is True:
             kw.reset(reset_board=False, reset_colors=False,
                      reset_agent_start_pos=False, reset_dynamics=False)

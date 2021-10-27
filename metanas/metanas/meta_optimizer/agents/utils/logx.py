@@ -15,7 +15,6 @@ import atexit
 import os
 import warnings
 
-from metanas.env.nas import NasEnv
 from metanas.meta_optimizer.agents.utils.mpi_tools import proc_id, mpi_statistics_scalar
 from metanas.meta_optimizer.agents.utils.serialization_utils import convert_json
 
@@ -135,7 +134,7 @@ class Logger:
             logger.save_config(locals())
         """
         # Can't serialize the NAS env
-        if isinstance(config['env'], NasEnv):
+        if hasattr(config['env'], 'primitives'):
             return
         config_json = convert_json(config)
         if self.exp_name is not None:

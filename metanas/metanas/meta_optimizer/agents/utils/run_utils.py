@@ -1,9 +1,8 @@
 
 from metanas.meta_optimizer.agents.utils.logx import colorize
-from metanas.meta_optimizer.agents.utils.mpi_tools import mpi_fork, msg
+from metanas.meta_optimizer.agents.utils.mpi_tools import mpi_fork
 from metanas.meta_optimizer.agents.utils.serialization_utils import convert_json
 import base64
-from copy import deepcopy
 import cloudpickle
 import json
 import numpy as np
@@ -40,7 +39,7 @@ WAIT_BEFORE_LAUNCH = 5
 def setup_logger_kwargs(exp_name, seed=None, data_dir=None, datestamp=False):
     """
     Sets up the output_dir for a logger and returns a dict for logger kwargs.
-    If no seed is given and datestamp is false, 
+    If no seed is given and datestamp is false,
     ::
         output_dir = data_dir/exp_name
     If a seed is given and datestamp is false,
@@ -49,8 +48,8 @@ def setup_logger_kwargs(exp_name, seed=None, data_dir=None, datestamp=False):
     If datestamp is true, amend to
     ::
         output_dir = data_dir/YY-MM-DD_exp_name/YY-MM-DD_HH-MM-SS_exp_name_s[seed]
-    You can force datestamp=True by setting ``FORCE_DATESTAMP=True`` in 
-    ``spinup/user_config.py``. 
+    You can force datestamp=True by setting ``FORCE_DATESTAMP=True`` in
+    ``spinup/user_config.py``.
     Args:
         exp_name (string): Name for experiment.
         seed (int): Seed for random number generators used by experiment.
@@ -94,12 +93,12 @@ def call_experiment(exp_name, thunk, seed=0, num_cpu=1, data_dir=None,
     There's also a SpinningUp-specific convenience added into executing the
     thunk: if ``env_name`` is one of the kwargs passed to call_experiment, it's
     assumed that the thunk accepts an argument called ``env_fn``, and that
-    the ``env_fn`` should make a gym environment with the given ``env_name``. 
+    the ``env_fn`` should make a gym environment with the given ``env_name``.
     The way the experiment is actually executed is slightly complicated: the
     function is serialized to a string, and then ``run_entrypoint.py`` is
     executed in a subprocess call with the serialized string as an argument.
     ``run_entrypoint.py`` unserializes the function call and executes it.
-    We choose to do it this way---instead of just calling the function 
+    We choose to do it this way---instead of just calling the function
     directly here---to avoid leaking state between successive experiments.
     Args:
         exp_name (string): Name for experiment.
@@ -110,7 +109,7 @@ def call_experiment(exp_name, thunk, seed=0, num_cpu=1, data_dir=None,
             the machine.
         data_dir (string): Used in configuring the logger, to decide where
             to store experiment results. Note: if left as None, data_dir will
-            default to ``DEFAULT_DATA_DIR`` from ``spinup/user_config.py``. 
+            default to ``DEFAULT_DATA_DIR`` from ``spinup/user_config.py``.
         **kwargs: All kwargs to pass to thunk.
     """
 
@@ -164,9 +163,9 @@ def call_experiment(exp_name, thunk, seed=0, num_cpu=1, data_dir=None,
     except CalledProcessError:
         err_msg = '\n'*3 + '='*DIV_LINE_WIDTH + '\n' + dedent("""
             There appears to have been an error in your experiment.
-            Check the traceback above to see what actually went wrong. The 
+            Check the traceback above to see what actually went wrong. The
             traceback below, included for completeness (but probably not useful
-            for diagnosing the error), shows the stack leading up to the 
+            for diagnosing the error), shows the stack leading up to the
             experiment launch.
             """) + '='*DIV_LINE_WIDTH + '\n'*3
         print(err_msg)
@@ -288,11 +287,11 @@ class ExperimentGrid:
         By default, if a shorthand isn't given, one is automatically generated
         from the key using the first three letters of each colon-separated
         term. To disable this behavior, change ``DEFAULT_SHORTHAND`` in the
-        ``spinup/user_config.py`` file to ``False``. 
+        ``spinup/user_config.py`` file to ``False``.
         Args:
             key (string): Name of parameter.
             vals (value or list of values): Allowed values of parameter.
-            shorthand (string): Optional, shortened name of parameter. For 
+            shorthand (string): Optional, shortened name of parameter. For
                 example, maybe the parameter ``steps_per_epoch`` is shortened
                 to ``steps``. 
             in_name (bool): When constructing variant names, force the

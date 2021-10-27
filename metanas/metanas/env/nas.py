@@ -57,6 +57,9 @@ class NasEnv(gym.Env):
         self.max_ep_len = max_ep_len  # max_steps
         self.reward_range = (-0.1, 4)
 
+        # Pick reward range,
+        # self.reward_range = (-1, 1)
+
         # Initialize the step counter
         self.step_count = 0
         self.terminate_episode = False
@@ -319,14 +322,12 @@ class NasEnv(gym.Env):
         if self.cell_type == "normal":
             if increase:
                 return self.increase_op(row_idx, edge_idx, op_idx)
-            else:
-                return self.decrease_op(row_idx, edge_idx, op_idx)
+            return self.decrease_op(row_idx, edge_idx, op_idx)
 
         elif self.cell_type == "reduce":
             if increase:
                 return self.increase_op(row_idx, edge_idx, op_idx)
-            else:
-                return self.decrease_op(row_idx, edge_idx, op_idx)
+            return self.decrease_op(row_idx, edge_idx, op_idx)
 
         else:
             raise RuntimeError(f"Cell type {self.cell_type} is not supported.")
@@ -603,7 +604,6 @@ class NasEnv(gym.Env):
                      primitives=gt.PRIMITIVES_NAS_BENCH_201)
 
         # Convert genotype to graph
-        # n_edges = sum([len(x) for x in geno])
         edges = []
 
         # All networks have transformed edge => node,
@@ -639,10 +639,11 @@ class NasEnv(gym.Env):
     def _meta_predictor_dataset_preprocess(self, task):
 
         # Get num_samples, n_train * k
-        # TODO: Should be testing dataset?
+        # Testing dataset does not have enough samples
         train_y, _ = next(iter(task.train_loader))
         assert train_y.shape[0] == self.config.num_samples, \
-            "Number of samples should equal training of meta_predictor"
+            "Number of samples should equal training of meta_predictor" \
+            f"{train_y.shape[0]}, {self.config.num_samples}"
 
         # Shape the image as (3, 32, 32)
         dataset = F.interpolate(train_y, size=(32, 32))
@@ -654,8 +655,20 @@ class NasEnv(gym.Env):
 
         # Normalize the features
         # TODO: Configurable
-        mean = torch.tensor([0.1307])
-        std = torch.tensor([0.3081])
+        if self.config.dataset == "omniglot":
+            mean = torch.tensor([0.9221])
+            std = torch.tensor([0.1257])
+
+        elif self.config.dataset == "triplemnist":
+            mean = torch.tensor([0.1307])
+            std = torch.tensor([0.3081])
+
+        elif self.config.dataset == "miniimagenet":
+            mean = torch.tensor([0.1307])
+            std = torch.tensor([0.3081])
+        else:
+            raise RuntimeError(
+                f"Dataset {self.config.dataset} is not supported.")
         dataset = dataset.sub_(mean).div_(std)
 
         # Extracts features by ResNet18

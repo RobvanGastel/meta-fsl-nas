@@ -7,6 +7,7 @@ import numpy as np
 
 import torch
 from torch.optim import Adam
+from torch.utils.tensorboard import SummaryWriter
 
 from metanas.meta_optimizer.agents.agent import RL_agent
 from metanas.meta_optimizer.agents.SAC.core import GRUActorCritic, count_vars
@@ -391,8 +392,7 @@ class SAC(RL_agent):
         h = self.init_hidden_states(batch_size=1)
 
         start_time = time.time()
-        o, ep_ret, ep_len = self.env.reset(), 0, 0
-        ep_max_acc = 0
+        o, ep_ret, ep_len, ep_max_acc = self.env.reset(), 0, 0, 0
 
         a2 = self.env.action_space.sample()
         r2 = 0
@@ -410,11 +410,11 @@ class SAC(RL_agent):
                 a = self.env.action_space.sample()
 
             o2, r, d, info_dict = self.env.step(a)
-            acc = info_dict['acc']
 
-            # TODO: Get accuracy from info_dict and measure
-            if acc is not None and acc > ep_max_acc:
-                ep_max_acc = acc
+            if 'acc' in info_dict:
+                acc = info_dict['acc']
+                if acc is not None and acc > ep_max_acc:
+                    ep_max_acc = acc
 
             ep_ret += r
             ep_len += 1
@@ -478,6 +478,7 @@ class SAC(RL_agent):
 
                 self.logger.log_tabular('Epoch', epoch)
                 self.logger.log_tabular('EpRet', with_min_and_max=True)
+                # Ignore this metric for non-NAS environments
                 self.logger.log_tabular('MaxAcc', with_min_and_max=True)
                 self.logger.log_tabular('EpLen', average_only=True)
                 self.logger.log_tabular('TotalEnvInteracts', t)

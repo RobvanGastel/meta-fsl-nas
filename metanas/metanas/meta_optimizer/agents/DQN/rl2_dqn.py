@@ -262,7 +262,7 @@ class DQN(RL_agent):
 
         expected_q_value = rew + self.gamma * target_q_value * (1 - done)
 
-        # TODO: Possibility of different losses
+        # Possibility of different losses
         loss = F.smooth_l1_loss(q_value, expected_q_value.detach())
         # loss = ((q_value - expected_q_value)**2).mean()
 
