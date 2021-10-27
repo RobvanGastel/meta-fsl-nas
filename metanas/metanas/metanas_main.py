@@ -162,10 +162,9 @@ def meta_architecture_search(
         f"train steps for evaluation:{ config.test_task_train_steps}")
 
     # run the evaluation
-    # TODO: Omit this for now
-    # config, alpha_logger, sparse_params = evaluate(
-    #     config, meta_model, task_distribution, task_optimizer
-    # )
+    config, alpha_logger, sparse_params = evaluate(
+        config, meta_model, task_distribution, task_optimizer
+    )
 
     # save results
     experiment = {
@@ -735,8 +734,7 @@ def evaluate(config, meta_model, task_distribution, task_optimizer):
     else:
         alpha_logger = None
 
-    # TODO: Disable meta-testing fine-tuning
-    for eval_epoch in range(1):
+    for eval_epoch in range(config.eval_epochs):
 
         meta_test_batch = task_distribution.sample_meta_test()
 

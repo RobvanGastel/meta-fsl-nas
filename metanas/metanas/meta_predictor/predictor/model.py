@@ -1,6 +1,7 @@
 ###############################################################################
 # Copyright (c) muhanzhang, D-VAE, NeurIPS 2019 [GitHub D-VAE]
-# Modified by Hayeon Lee, Eunyoung Hyung, MetaD2A, ICLR2021, 2021. 03 [GitHub MetaD2A]
+# Modified by Hayeon Lee, Eunyoung Hyung, MetaD2A, ICLR2021, 2021.
+# 03 [GitHub MetaD2A]
 ###############################################################################
 
 import torch
@@ -97,7 +98,7 @@ class PredictorModel(nn.Module):
             nn.Linear(self.hs, 1)
         )
 
-        # TODO: Paper describes an output of
+        # Paper describes an output of
         # Linear, Relu => Linear Relu
         self.acc_fc = nn.Sequential(
             nn.Linear(input_dim, self.hs),

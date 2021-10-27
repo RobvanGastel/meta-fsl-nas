@@ -2,7 +2,7 @@
 import metanas.utils.genotypes as gt
 from metanas.models.search_cnn import SearchCNNController
 from metanas.utils.test_config import init_config
-from metanas.env.core import NasEnv
+from metanas.env.nas import NasEnv
 import unittest
 
 import copy

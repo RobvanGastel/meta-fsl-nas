@@ -134,15 +134,11 @@ class SearchCNNController(nn.Module):
         self.primitives = PRIMITIVES
         n_ops = len(PRIMITIVES)
 
-        # UNAS adjustments to sample alphas by REINFORCE gradient
-        # estimator
         self.alpha_normal = nn.ParameterList()
         self.alpha_reduce = nn.ParameterList()
 
         for i in range(n_nodes):
             # create alpha parameters over parallel operations,
-            # note the requires_grad only for UNAS
-            # # , requires_grad=True
             self.alpha_normal.append(nn.Parameter(
                 1e-3 * torch.randn(i + 2, n_ops)))
             self.alpha_reduce.append(nn.Parameter(
@@ -246,20 +242,6 @@ class SearchCNNController(nn.Module):
             weights_pw_normal,
             weights_pw_reduce,
         )
-
-    # UNAS methods for the model
-    # def discretize_alphas(self, alphas):
-    #     """Return the discrete/normalized alphas and the
-    #     raw alphas for UNAS"""
-    #     alphas = [self.apply_normalizer(alpha) for alpha in alphas]
-    #     return alphas
-
-    # def set_alphas(self, alpha_normal, alpha_reduce):
-    #     """We set the alphas"""
-    #     print(alpha_normal[0])
-    #     for i, (r, n) in enumerate(zip(alpha_reduce, alpha_normal)):
-    #         self.alpha_normal[i].data = r
-    #         self.alpha_reduce[i].data = n
 
     def prune_alphas(self, prune_threshold=0.0, val=-10e8):
         """Set the alphas with probability below prune_threshold to a
