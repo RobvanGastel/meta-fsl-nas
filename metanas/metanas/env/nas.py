@@ -654,18 +654,17 @@ class NasEnv(gym.Env):
             dataset = dataset.repeat(1, 3, 1, 1)
 
         # Normalize the features
-        # TODO: Configurable
         if self.config.dataset == "omniglot":
             mean = torch.tensor([0.9221])
             std = torch.tensor([0.1257])
 
         elif self.config.dataset == "triplemnist":
-            mean = torch.tensor([0.1307])
-            std = torch.tensor([0.3081])
+            mean = torch.tensor([0.0439])
+            std = torch.tensor([0.1879])
 
         elif self.config.dataset == "miniimagenet":
-            mean = torch.tensor([0.1307])
-            std = torch.tensor([0.3081])
+            mean = torch.tensor([0.4416])
+            std = torch.tensor([0.2328])
         else:
             raise RuntimeError(
                 f"Dataset {self.config.dataset} is not supported.")
