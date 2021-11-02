@@ -7,7 +7,7 @@ MODEL_PATH=/home/rob/Desktop/e200_meta_state
 
 for SEED in ${SEEDS}
 do
-    TRAIN_DIR=/home/rob/Git/meta-fsl-nas/metanas/results/agent/${DS}_metanas_${AGENT}_agent/${DS}_metanas_${AGENT}_agent_$SEED
+    TRAIN_DIR=/home/rob/Git/meta-fsl-nas/metanas/results/agent/${DS}_metanas_${AGENT}_agent_metad2a/${DS}_metanas_${AGENT}_agent__metad2a_$SEED
 	mkdir -p $TRAIN_DIR
 
     args=(
@@ -76,7 +76,7 @@ do
         --agent_update_every 20 \
         --agent_update_after 400 \
 
-        --rew_model_path /home/rob/Git/predictor_max_corr.pt \
+        --rew_model_path /home/rob/Git/meta_predictor/predictor_max_corr.pt \
         --use_rew_estimation
     )
 
