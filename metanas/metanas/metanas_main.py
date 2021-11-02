@@ -5,6 +5,7 @@ import time
 import numpy as np
 import pickle
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from collections import OrderedDict
 
@@ -540,8 +541,12 @@ def train(
                 normal_alphas = env_normal.get_max_alphas()
                 reduce_alphas = env_reduce.get_max_alphas()
 
-                meta_model.alpha_normal = normal_alphas
-                meta_model.alpha_normal = reduce_alphas
+                meta_model.alpha_normal = nn.ParameterList()
+                meta_model.alpha_reduce = nn.ParameterList()
+
+                for n_alpha, r_alpha in zip(normal_alphas, reduce_alphas):
+                    meta_model.alpha_normal.append(nn.Parameter(n_alpha))
+                    meta_model.alpha_reduce.append(nn.Parameter(r_alpha))
 
             task_infos += [
                 task_optimizer.step(

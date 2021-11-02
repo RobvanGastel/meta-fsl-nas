@@ -591,7 +591,7 @@ class NasEnv(gym.Env):
         )
 
         y_pred = y_pred.item()
-        print(y_pred)
+        # print(y_pred)
 
         # x_min, x_max = -1, 1
         # acc = (y_pred - x_min)/(x_max - x_min)

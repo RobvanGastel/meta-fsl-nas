@@ -144,21 +144,23 @@ class EpisodeMemory:
 
 
 class DQN(RL_agent):
-    def __init__(self, env, test_env, max_ep_len=500, steps_per_epoch=4000,
+    def __init__(self, config, env, max_ep_len=500, steps_per_epoch=4000,
                  epochs=100, gamma=0.99, lr=5e-4, batch_size=32,
                  num_test_episodes=10, logger_kwargs=dict(), seed=42,
-                 save_freq=1, qnet_kwargs=dict(),
+                 save_freq=1, qnet_kwargs=dict(), hidden_size=256,
                  replay_size=int(1e6), update_after=3500,
                  update_every=1, update_target=2, polyak=0.995, time_step=20,
                  random_update=True,
                  epsilon=0.1, final_epsilon=0.001, epsilon_decay=0.995):
-        super().__init__(env, test_env, max_ep_len, steps_per_epoch,
-                         epochs, gamma, lr, batch_size, seed,
-                         num_test_episodes, logger_kwargs)
+        super().__init__(config, env, epochs, steps_per_epoch,
+                         num_test_episodes, logger_kwargs,
+                         seed, gamma, lr, batch_size,
+                         update_every, save_freq, hidden_size)
 
         torch.manual_seed(seed)
         np.random.seed(seed)
 
+        self.max_ep_len = self.env.max_ep_len
         self.save_freq = save_freq
         self.update_every = update_every
         self.update_after = update_after
@@ -307,16 +309,20 @@ class DQN(RL_agent):
                 a2 = a
             self.logger.store(TestEpRet=ep_ret, TestEpLen=ep_len)
 
-    def train_agent(self):
+    def train_agent(self, env=None):
         episode_record = EpisodeMemory(self.random_update)
         h = self.init_hidden_states(batch_size=1)
+
+        if env is not None:
+            self.env = env
 
         start_time = time.time()
         o, ep_ret, ep_len = self.env.reset(), 0, 0
         a2 = self.env.action_space.sample()
         r2 = 0
 
-        for t in range(self.total_steps):
+        for t in range(self.global_steps,
+                       self.global_steps+self.total_steps):
 
             a, h = self.get_action(o, a2, r2, h)
             o2, r, d, _ = self.env.step(a)
@@ -345,7 +351,7 @@ class DQN(RL_agent):
                 self.logger.store(EpRet=ep_ret, EpLen=ep_len, Eps=self.epsilon)
                 o, ep_ret, ep_len = self.env.reset(), 0, 0
 
-                h = self.init_hidden_states(batch_size=1)
+                # h = self.init_hidden_states(batch_size=1)
 
                 # Update epsilon and Linear annealing
                 self.epsilon = max(self.final_epsilon,
@@ -365,11 +371,10 @@ class DQN(RL_agent):
 
                 # Test the performance of the deterministic version of the
                 # agent.
-                self.test_agent()
+                # self.test_agent()
 
                 # Log info about epoch
-                log_perf_board = ['EpRet', 'EpLen', 'TestEpRet',
-                                  'TestEpLen', 'QVals']
+                log_perf_board = ['EpRet', 'EpLen', 'QVals']
                 log_loss_board = ['LossQ']
                 log_board = {'Performance': log_perf_board,
                              'Loss': log_loss_board}
@@ -392,8 +397,8 @@ class DQN(RL_agent):
                 self.logger.log_tabular('Epoch', epoch)
                 self.logger.log_tabular('EpRet', with_min_and_max=True)
                 self.logger.log_tabular('EpLen', average_only=True)
-                self.logger.log_tabular('TestEpRet', with_min_and_max=True)
-                self.logger.log_tabular('TestEpLen', average_only=True)
+                # self.logger.log_tabular('TestEpRet', with_min_and_max=True)
+                # self.logger.log_tabular('TestEpLen', average_only=True)
                 self.logger.log_tabular('Epsilon', self.epsilon)
                 self.logger.log_tabular('TotalEnvInteracts', t)
                 self.logger.log_tabular('QVals', with_min_and_max=True)
@@ -401,3 +406,6 @@ class DQN(RL_agent):
 
                 self.logger.log_tabular('Time', time.time()-start_time)
                 self.logger.dump_tabular()
+
+        # Increase global steps for the next trial
+        self.global_steps += self.total_steps
