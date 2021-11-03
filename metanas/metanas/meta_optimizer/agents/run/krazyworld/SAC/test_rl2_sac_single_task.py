@@ -40,16 +40,14 @@ if __name__ == "__main__":
     logger_kwargs = setup_logger_kwargs(
         path,
         seed=args.seed)
-    ac_kwargs = dict(hidden_size=[hidden_size]*2)
-
+    ac_kwargs = dict(hidden_sizes=[hidden_size]*2)
 
     agent = SAC(None, env, ac_kwargs=ac_kwargs,
                 lr=3e-4,
-                epochs=1,  # Trials per MDP
-                hidden_size=hidden_size,
+                epochs=100,  # Trials per MDP
                 steps_per_epoch=4000,
                 start_steps=10000,
-                update_after=1000,
+                update_after=3000,
                 update_every=20,
                 batch_size=32,
                 replay_size=int(1e6),
@@ -59,5 +57,5 @@ if __name__ == "__main__":
                 logger_kwargs=logger_kwargs)
 
     # Meta-loop
-    for i in range(args.iterations):
-        agent.train_agent()
+    # for i in range(args.iterations):
+    agent.train_agent()
