@@ -15,16 +15,21 @@ class CategoricalPolicy(nn.Module):
                  activation=nn.ReLU()):
         super().__init__()
 
+        self.activation = activation
+
+        self.Linear1 = nn.Linear(hidden_size, hidden_size)
         self.policy = nn.Linear(hidden_size, act_dim)
 
     def act(self, memory_embedding):
-        action_logits = self.policy(memory_embedding)
+        action_logits = self.policy(
+            self.activation(self.Linear1(memory_embedding)))
 
         # Greedy action selection
         return torch.argmax(action_logits, dim=-1)
 
     def sample(self, memory_embedding):
-        action_logits = self.policy(memory_embedding)
+        action_logits = self.policy(
+            self.activation(self.Linear1(memory_embedding)))
 
         action_probs = F.softmax(action_logits, dim=-1)
         action_dist = Categorical(action_probs)
@@ -42,10 +47,13 @@ class QNetwork(nn.Module):
                  activation=nn.ReLU()):
         super().__init__()
 
+        self.activation = activation
+
+        self.Linear1 = nn.Linear(hidden_size, hidden_size)
         self.q = nn.Linear(hidden_size, act_dim)
 
     def forward(self, memory_embedding):
-        return self.q(memory_embedding)
+        return self.q(self.activation(self.Linear1(memory_embedding)))
 
 
 class Memory(nn.Module):
@@ -83,7 +91,7 @@ class Memory(nn.Module):
         return memory_embedding, hid_out
 
     def _create_one_hot(self, act):
-        index = torch.eye(self.act_dim)
+        index = torch.eye(self.act_dim).cuda()
         return index[act.long()]
 
 

@@ -2,8 +2,6 @@ import torch
 import torch.optim as optim
 import torch.nn.functional as F
 
-import numpy as np
-
 import time
 import random
 
@@ -31,21 +29,24 @@ class ReplayBuffer:
 
 
 class DQN(RL_agent):
-    def __init__(self, env, test_env, max_ep_len=500, steps_per_epoch=4000,
-                 epochs=100, gamma=0.99, lr=5e-3, batch_size=64,
+    def __init__(self, config, env, test_env, steps_per_epoch=4000,
+                 epochs=100, gamma=0.99, polyak=0.995, lr=5e-3,
                  num_test_episodes=10, logger_kwargs=dict(), seed=42,
                  save_freq=1, qnet_kwargs=dict(),
-                 replay_size=int(1e6), update_after=2000,
-                 update_every=1, update_target=1, polyak=0.995,
+                 replay_size=int(1e6), batch_size=64,
+                 update_after=2000, update_every=10, update_target=4,
                  epsilon=0.1, final_epsilon=0.001, epsilon_decay=0.995):
-        super().__init__(env, test_env, max_ep_len, steps_per_epoch,
-                         epochs, gamma, lr, batch_size, seed,
-                         num_test_episodes, logger_kwargs)
+        super().__init__(config, env, logger_kwargs,
+                         seed, gamma, lr, save_freq)
 
-        torch.manual_seed(seed)
-        np.random.seed(seed)
+        self.test_env = test_env
+        self.num_test_episodes = num_test_episodes
 
-        self.save_freq = save_freq
+        self.epochs = epochs
+        self.batch_size = batch_size
+        self.steps_per_epoch = steps_per_epoch
+        self.total_steps = self.epochs * self.steps_per_epoch
+
         self.update_every = update_every
         self.update_after = update_after
         self.update_target = update_target
@@ -79,7 +80,7 @@ class DQN(RL_agent):
         # Count variables
         var_counts = tuple(count_vars(module)
                            for module in [self.online_network,
-                           self.target_network])
+                                          self.target_network])
         self.logger.log(
             '\nNumber of parameters: \t q1: %d, \t q2: %d\n' % var_counts)
 
@@ -116,7 +117,6 @@ class DQN(RL_agent):
         expected_q_value = reward + self.gamma * next_q_value * (1 - done)
 
         loss = F.smooth_l1_loss(q_value, expected_q_value)
-        # ((q_value - expected_q_value)**2).mean()
 
         self.optimizer.zero_grad()
         loss.backward()
@@ -145,7 +145,7 @@ class DQN(RL_agent):
         self.logger.store(LossQ=loss.item(), **q_info)
 
     def test_agent(self):
-        for j in range(self.num_test_episodes):
+        for _ in range(self.num_test_episodes):
             o, d, ep_ret, ep_len = self.test_env.reset(), False, 0, 0
             while not(d or (ep_len == self.max_ep_len)):
                 # Take deterministic actions at test time
@@ -170,7 +170,7 @@ class DQN(RL_agent):
             # that isn't based on the agent's state)
             d = False if ep_len == self.max_ep_len else d
 
-            self.replay_buffer.push(o, a, o2, r/100.0, d)
+            self.replay_buffer.push(o, a, o2, r, d)
 
             # Super critical, easy to overlook step: make sure to update
             # most recent observation!

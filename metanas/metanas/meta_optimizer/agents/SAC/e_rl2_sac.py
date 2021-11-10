@@ -6,6 +6,7 @@ import itertools
 import numpy as np
 
 import torch
+import torch.nn as nn
 from torch.optim import Adam
 from torch.utils.tensorboard import SummaryWriter
 
@@ -189,14 +190,14 @@ class SAC(RL_agent):
             max_ep_len=self.max_ep_len,
             batch_size=batch_size,
             device=self.device,
-            time_step=20
+            time_step=10
         )
 
         # Optimize entropy exploration-exploitation parameter
-        self.entropy_target = 0.98 * (-np.log(1 / self.env.action_space.n))
-        self.log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
-        self.alpha = self.log_alpha.exp()
-        self.alpha_optimizer = Adam([self.log_alpha], lr=self.lr)
+        # self.entropy_target = 0.95 * (-np.log(1 / self.env.action_space.n))
+        # self.log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
+        self.alpha = 0.2  # self.log_alpha.exp()
+        # self.alpha_optimizer = Adam([self.log_alpha], lr=self.lr)
 
         self.pi_params = itertools.chain(self.ac.pi.parameters(),
                                          self.ac.memory.parameters())
@@ -243,6 +244,7 @@ class SAC(RL_agent):
 
             # print(a2.shape, q_pi_targ.shape, logp_a2.shape)
             # To map R^|A| -> R
+            # .detach()
             next_q = (a2 * (q_pi_targ - self.alpha * logp_a2)
                       ).sum(dim=-1).unsqueeze(-1)
 
@@ -277,7 +279,7 @@ class SAC(RL_agent):
             q_pi = torch.min(q1_pi, q2_pi)
 
         # Entropy-regularized policy loss
-        loss_pi = (pi * (self.alpha.detach() * logp_pi - q_pi)).sum(-1).mean()
+        loss_pi = (pi * (self.alpha * logp_pi - q_pi)).sum(-1).mean()
 
         # Entropy
         entropy = -torch.sum(pi * logp_pi, dim=1)
@@ -295,6 +297,8 @@ class SAC(RL_agent):
         self.q_optimizer.zero_grad()
         loss_q, q_info = self.compute_critic_loss(batch)
         loss_q.backward()
+
+        nn.utils.clip_grad_norm_(self.ac.parameters(), 1.0)
         self.q_optimizer.step()
 
         # Recording Q-values
@@ -309,6 +313,8 @@ class SAC(RL_agent):
         self.pi_optimizer.zero_grad()
         loss_pi, logp_pi, pi_info = self.compute_policy_loss(batch)
         loss_pi.backward()
+
+        nn.utils.clip_grad_norm_(self.ac.parameters(), 1.0)
         self.pi_optimizer.step()
 
         # Unfreeze Q-networks so you can optimize it at next DDPG step.
@@ -318,19 +324,19 @@ class SAC(RL_agent):
         # Recording policy values
         self.logger.store(LossPi=loss_pi.item(), **pi_info)
 
-        # Entropy values
-        alpha_loss = -(self.log_alpha * (logp_pi.detach() +
-                                         self.entropy_target)).mean()
+        # # Entropy values
+        # alpha_loss = -(self.log_alpha * (logp_pi.detach() +
+        #                                  self.entropy_target)).mean()
 
-        self.alpha_optimizer.zero_grad()
-        alpha_loss.backward()
-        self.alpha_optimizer.step()
+        # self.alpha_optimizer.zero_grad()
+        # alpha_loss.backward()
+        # self.alpha_optimizer.step()
 
-        self.alpha = self.log_alpha.exp()
+        # self.alpha = self.log_alpha.exp()
 
-        # Recording alpha and alpha loss
-        self.logger.store(Alpha=alpha_loss.cpu().detach().numpy(),
-                          LossAlpha=self.alpha.cpu().detach().numpy())
+        # # Recording alpha and alpha loss
+        # self.logger.store(LossAlpha=alpha_loss.cpu().detach().numpy(),
+        #                   Alpha=self.alpha.cpu().detach().numpy())
 
         # Finally, update target networks by polyak averaging.
         with torch.no_grad():
@@ -451,8 +457,8 @@ class SAC(RL_agent):
 
                 # Log info about the current trial
                 log_perf_board = ['EpRet', 'EpLen', 'MaxAcc', 'Q2Vals',
-                                  'Q1Vals', 'LogPi', 'Alpha']
-                log_loss_board = ['LossPi', 'LossQ', 'LossAlpha']
+                                  'Q1Vals', 'LogPi']
+                log_loss_board = ['LossPi', 'LossQ']
                 log_board = {'Performance': log_perf_board,
                              'Loss': log_loss_board}
 
@@ -479,8 +485,8 @@ class SAC(RL_agent):
                 self.logger.log_tabular('Q2Vals', with_min_and_max=True)
                 self.logger.log_tabular('Q1Vals', with_min_and_max=True)
                 self.logger.log_tabular('LogPi', with_min_and_max=True)
-                self.logger.log_tabular('Alpha', average_only=True)
-                self.logger.log_tabular('LossAlpha', average_only=True)
+                # self.logger.log_tabular('Alpha', average_only=True)
+                # self.logger.log_tabular('LossAlpha', average_only=True)
                 self.logger.log_tabular('LossPi', average_only=True)
                 self.logger.log_tabular('LossQ', average_only=True)
 

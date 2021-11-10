@@ -1,6 +1,5 @@
 
 import torch
-import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 
@@ -128,22 +127,25 @@ class EpisodeMemory:
 
 
 class DRQN(RL_agent):
-    def __init__(self, env, test_env, max_ep_len=500, steps_per_epoch=4000,
+    def __init__(self, config, env, test_env, steps_per_epoch=5000,
                  epochs=100, gamma=0.99, lr=3e-4, batch_size=32,
                  num_test_episodes=10, logger_kwargs=dict(), seed=42,
                  save_freq=1, qnet_kwargs=dict(),
-                 replay_size=int(1e6), update_after=3500,
+                 replay_size=int(1e6), update_after=4000,
                  update_every=1, update_target=2, polyak=0.995, time_step=20,
                  random_update=True,
                  epsilon=0.1, final_epsilon=0.001, epsilon_decay=0.995):
-        super().__init__(env, test_env, max_ep_len, steps_per_epoch,
-                         epochs, gamma, lr, batch_size, seed,
-                         num_test_episodes, logger_kwargs)
+        super().__init__(config, env, logger_kwargs,
+                         seed, gamma, lr, save_freq)
 
-        torch.manual_seed(seed)
-        np.random.seed(seed)
+        self.test_env = test_env
+        self.num_test_episodes = num_test_episodes
 
-        self.save_freq = save_freq
+        self.epochs = epochs
+        self.batch_size = batch_size
+        self.steps_per_epoch = steps_per_epoch
+        self.total_steps = self.epochs * self.steps_per_epoch
+
         self.update_every = update_every
         self.update_after = update_after
         self.update_target = update_target
@@ -161,7 +163,6 @@ class DRQN(RL_agent):
             obs_dim, act_dim, **qnet_kwargs).to(self.device)
         self.target_network.load_state_dict(self.online_network.state_dict())
 
-        # Replay size back to 100?
         self.episode_buffer = EpisodicReplayBuffer(
             random_update=self.random_update,
             replay_size=replay_size,
@@ -184,7 +185,7 @@ class DRQN(RL_agent):
         # Count variables
         var_counts = tuple(count_vars(module)
                            for module in [self.online_network,
-                           self.target_network])
+                                          self.target_network])
         self.logger.log(
             '\nNumber of parameters: \t q1: %d, \t q2: %d\n' % var_counts)
 
@@ -216,6 +217,7 @@ class DRQN(RL_agent):
         h_targ, c_targ = self.init_hidden_states(batch_size=self.batch_size)
         h, c = self.init_hidden_states(batch_size=self.batch_size)
 
+        # TODO: Update method might contain mistakes check rl2_dqn
         q_values, _, _ = self.online_network(obs, h, c)
         q_value = q_values.gather(2, act)
 
@@ -226,9 +228,7 @@ class DRQN(RL_agent):
 
         # Bellman backup equation
         expected_q_value = rew + self.gamma * next_q_value * (1 - done)
-
         loss = F.smooth_l1_loss(q_value, expected_q_value)
-        # loss = ((q_value - expected_q_value)**2).mean()
 
         self.optimizer.zero_grad()
         loss.backward()

@@ -185,7 +185,6 @@ class SAC(RL_agent):
         self.target_q_params = itertools.chain(self.ac_targ.q1.parameters(),
                                                self.ac_targ.q2.parameters())
 
-        # Set replay buffer
         self.episode_buffer = EpisodicReplayBuffer(
             random_update=True,
             replay_size=replay_size,
@@ -196,10 +195,10 @@ class SAC(RL_agent):
         )
 
         # Optimize entropy exploration-exploitation parameter
-        self.entropy_target = 0.98 * (-np.log(1 / self.env.action_space.n))
-        self.log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
-        self.alpha = self.log_alpha.exp()
-        self.alpha_optimizer = Adam([self.log_alpha], lr=self.lr)
+        # self.entropy_target = 0.98 * (-np.log(1 / self.env.action_space.n))
+        # self.log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
+        self.alpha = 0.2  # self.log_alpha.exp()
+        # self.alpha_optimizer = Adam([self.log_alpha], lr=self.lr)
 
         # Set up optimizers for policy and q-function
         self.pi_optimizer = Adam(self.ac.pi.parameters(), lr=self.lr)
@@ -281,7 +280,7 @@ class SAC(RL_agent):
             q_pi = torch.min(q1_pi, q2_pi)
 
         # Entropy-regularized policy loss
-        loss_pi = (pi * (self.alpha.detach() * logp_pi - q_pi)).sum(-1).mean()
+        loss_pi = (pi * (self.alpha * logp_pi - q_pi)).sum(-1).mean()
 
         # Entropy
         entropy = -torch.sum(pi * logp_pi, dim=1)
@@ -323,18 +322,18 @@ class SAC(RL_agent):
         self.logger.store(LossPi=loss_pi.item(), **pi_info)
 
         # Entropy values
-        alpha_loss = -(self.log_alpha * (logp_pi.detach() +
-                                         self.entropy_target)).mean()
+        # alpha_loss = -(self.log_alpha * (logp_pi.detach() +
+        #                                  self.entropy_target)).mean()
 
-        self.alpha_optimizer.zero_grad()
-        alpha_loss.backward()
-        self.alpha_optimizer.step()
+        # self.alpha_optimizer.zero_grad()
+        # alpha_loss.backward()
+        # self.alpha_optimizer.step()
 
-        self.alpha = self.log_alpha.exp()
+        # self.alpha = self.log_alpha.exp()
 
         # Recording alpha and alpha loss
-        self.logger.store(Alpha=alpha_loss.cpu().detach().numpy(),
-                          AlphaLoss=self.alpha.cpu().detach().numpy())
+        # self.logger.store(Alpha=alpha_loss.cpu().detach().numpy(),
+        #                   AlphaLoss=self.alpha.cpu().detach().numpy())
 
         # Finally, update target networks by polyak averaging.
         with torch.no_grad():

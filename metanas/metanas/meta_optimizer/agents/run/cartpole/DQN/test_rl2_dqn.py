@@ -22,9 +22,12 @@ if __name__ == "__main__":
         env = gym.make("CartPole-v1")
         test_env = gym.make("CartPole-v1")
 
+    env.max_ep_len = 500
+    test_env.max_ep_len = 500
+
     logger_kwargs = setup_logger_kwargs(path, seed=args.seed)
 
     qnet_kwargs = dict(hidden_size=64)
-    agent = DQN(env, test_env, seed=args.seed, qnet_kwargs=qnet_kwargs,
+    agent = DQN(None, env, test_env, seed=args.seed, qnet_kwargs=qnet_kwargs,
                 logger_kwargs=logger_kwargs)
     agent.train_agent()

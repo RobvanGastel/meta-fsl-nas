@@ -4,7 +4,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributions.normal import Normal
 from torch.distributions import Categorical
 
 
@@ -107,6 +106,7 @@ class GRUCategoricalPolicy(nn.Module):
 
         # unroll the GRU network
         gru_out, hid_out = self.gru(gru_input.float(), hid.float())
+        print(gru_out.shape)
         q = self.Linear2(gru_out)
 
         return q, hid_out

@@ -1,8 +1,13 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 import numpy as np
+
+
+def combined_shape(length, shape=None):
+    if shape is None:
+        return (length,)
+    return (length, shape) if np.isscalar(shape) else (length, *shape)
 
 
 def count_vars(module):
@@ -15,11 +20,6 @@ def mlp(sizes, activation, output_activation=nn.Identity):
         act = activation if j < len(sizes)-2 else output_activation
         layers += [nn.Linear(sizes[j], sizes[j+1]), act()]
     return nn.Sequential(*layers)
-
-
-def create_one_hot(act, act_dim):
-    index = torch.eye(act_dim).cuda()
-    return index[act.long()]
 
 
 class MLPQNetwork(nn.Module):
@@ -39,62 +39,71 @@ class MLPQNetwork(nn.Module):
 class LSTMQNetwork(nn.Module):
     def __init__(self, obs_dim, act_dim, hidden_size=64, activation=nn.ReLU):
         super().__init__()
-        self.activation = activation
+        self.activation = activation()
 
-        self.Linear1 = nn.Linear(obs_dim, hidden_size)
+        self.linear1 = nn.Linear(obs_dim, hidden_size)
         self.lstm = nn.LSTM(hidden_size, hidden_size, batch_first=True)
-        # self.Linear2 = nn.Linear(hidden_size, act_dim)
 
-        self.adv = nn.Linear(hidden_size, out_features=act_dim)
+        self.a = nn.Linear(hidden_size, act_dim)
         self.v = nn.Linear(hidden_size, 1)
 
     def forward(self, x, h, c):
+        x = self.activation(self.linear1(x))
+        x, (h_out, c_out) = self.lstm(x, (h, c))
 
-        self.lstm.flatten_parameters()
-
-        x = F.relu(self.Linear1(x))
-        x, (new_h, new_c) = self.lstm(x, (h, c))
-
-        # x = self.Linear2(x)
-        # return x, new_h, new_c
-        a = self.adv(x)
         v = self.v(x)
+        a = self.a(x)
 
-        return v + a - a.mean(), new_h, new_c
+        return v + a - a.mean(), h_out, c_out
 
 
 class RL2QNetwork(nn.Module):
-    def __init__(self, obs_dim, act_dim, hidden_size=64, activation=nn.ReLU):
+    def __init__(self, obs_dim, act_dim, device, hidden_size=64,
+                 activation=nn.ReLU):
         super().__init__()
         self.activation = activation()
         self.act_dim = act_dim
+        self.device = device
 
-        self.Linear1 = nn.Linear(obs_dim, hidden_size)
+        self.linear1 = nn.Linear(obs_dim, hidden_size)
         self.gru = nn.GRU(hidden_size+act_dim+1,  # +1 for the reward
                           hidden_size,
                           batch_first=True)
-        self.Linear2 = nn.Linear(hidden_size, act_dim)
 
-#         self.adv = nn.Linear(256, out_features=act_dim)
-#         self.val = nn.Linear(256, 1)
+        self.a = nn.Linear(hidden_size, act_dim)
+        self.v = nn.Linear(hidden_size, 1)
 
-    def forward(self, obs, prev_act, prev_rew, hid_in):
+    def _one_hot(self, act):
+        return torch.eye(self.act_dim)[act.long(), :].to(self.device)
 
-        self.gru.flatten_parameters()
+    def forward(self, obs, prev_act, prev_rew, hid_in,
+                training=False):
 
-        prev_act = create_one_hot(prev_act, self.act_dim)
-        gru_input = self.activation(self.Linear1(obs))
+        prev_act = self._one_hot(prev_act)
+        obs_enc = self.activation(self.linear1(obs))
+
         gru_input = torch.cat(
             [
-                gru_input,
+                obs_enc,
                 prev_act,
                 prev_rew
             ],
-            dim=2,
+            dim=-1,
         )
 
-        # unroll the GRU network
-        gru_out, hid_out = self.gru(gru_input.float(), hid_in.float())
-        q = self.Linear2(gru_out)
+        # Input rnn: (batch size, sequence length, features)
+        if training:
+            gru_input = gru_input.unsqueeze(0)
+            gru_out, _ = self.gru(gru_input, hid_in)
+            gru_out = gru_out.squeeze(0)
+        else:
+            gru_input = gru_input.unsqueeze(1)
+            gru_out, _ = self.gru(gru_input, hid_in)
+            gru_out = gru_out.squeeze(1)
 
-        return q, hid_out
+        # unroll the GRU network
+        gru_out, hid_out = self.gru(gru_input, hid_in)
+
+        v = self.v(gru_out)
+        a = self.a(gru_out)
+        return v + a - a.mean(), hid_out

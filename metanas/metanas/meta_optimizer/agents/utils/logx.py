@@ -1,5 +1,4 @@
 """
-
 Some simple logging functionality, inspired by rllab's logging.
 
 Logs to a tab-separated-values file (path/to/output_directory/progress.txt)
@@ -15,7 +14,8 @@ import atexit
 import os
 import warnings
 
-from metanas.meta_optimizer.agents.utils.mpi_tools import proc_id, mpi_statistics_scalar
+from metanas.meta_optimizer.agents.utils.mpi_tools import (proc_id,
+                                                           mpi_statistics_scalar)
 from metanas.meta_optimizer.agents.utils.serialization_utils import convert_json
 
 color2num = dict(
@@ -61,13 +61,13 @@ class Logger:
         Initialize a Logger.
 
         Args:
-            output_dir (string): A directory for saving results to. If 
+            output_dir (string): A directory for saving results to. If
                 ``None``, defaults to a temp directory of the form
                 ``/tmp/experiments/somerandomnumber``.
 
-            output_fname (string): Name for the tab-separated-value file 
-                containing metrics logged throughout a training run. 
-                Defaults to ``progress.txt``. 
+            output_fname (string): Name for the tab-separated-value file
+                containing metrics logged throughout a training run.
+                Defaults to ``progress.txt``.
 
             exp_name (string): Experiment name. If you run multiple training
                 runs and give them all the same ``exp_name``, the plotter
@@ -124,7 +124,7 @@ class Logger:
         Call this once at the top of your experiment, passing in all important
         config vars as a dict. This will serialize the config to JSON, while
         handling anything which can't be serialized in a graceful way (writing
-        as informative a string as possible). 
+        as informative a string as possible).
 
         Example use:
 
@@ -155,7 +155,7 @@ class Logger:
         All diagnostic logging is separate from this function. This function
         will save whatever is in ``state_dict``---usually just a copy of the
         environment---and the most recent parameters for the model you
-        previously set up saving for with ``setup_tf_saver``. 
+        previously set up saving for with ``setup_tf_saver``.
 
         Call with any frequency you prefer. If you only want to maintain a
         single state and overwrite it at each call with the most recent
@@ -251,18 +251,18 @@ class EpochLogger(Logger):
     A variant of Logger tailored for tracking average values over epochs.
 
     Typical use case: there is some quantity which is calculated many times
-    throughout an epoch, and at the end of the epoch, you would like to 
+    throughout an epoch, and at the end of the epoch, you would like to
     report the average / std / min / max value of that quantity.
 
     With an EpochLogger, each time the quantity is calculated, you would
-    use 
+    use
 
     .. code-block:: python
 
         epoch_logger.store(NameOfQuantity=quantity_value)
 
-    to load it into the EpochLogger's state. Then at the end of the epoch, you 
-    would use 
+    to load it into the EpochLogger's state. Then at the end of the epoch, you
+    would use
 
     .. code-block:: python
 
