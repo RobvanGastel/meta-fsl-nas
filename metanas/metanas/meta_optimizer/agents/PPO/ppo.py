@@ -5,9 +5,9 @@ import numpy as np
 
 
 from metanas.meta_optimizer.agents.agent import RL_agent
+from metanas.meta_optimizer.agents.core import combined_shape
 from metanas.meta_optimizer.agents.PPO.core import (MLPActorCritic,
-                                                    discount_cumsum,
-                                                    combined_shape)
+                                                    discount_cumsum)
 
 
 class RolloutBuffer:
@@ -68,7 +68,8 @@ class RolloutBuffer:
         self.adv_buf[path_slice] = discount_cumsum(
             deltas, self.gamma * self.lam)
 
-        # the next line computes rewards-to-go, to be targets for the value function
+        # the next line computes rewards-to-go, to be targets for the value
+        # function
         self.ret_buf[path_slice] = discount_cumsum(rews, self.gamma)[:-1]
 
         self.path_start_idx = self.ptr

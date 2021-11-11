@@ -3,103 +3,19 @@ import torch
 import torch.optim as optim
 import torch.nn.functional as F
 
-import numpy as np
 import time
 
 from metanas.meta_optimizer.agents.agent import RL_agent
-from metanas.meta_optimizer.agents.DQN.core import (RL2QNetwork,
-                                                    count_vars, combined_shape)
-
-
-class EpisodicReplayBuffer:
-    """
-    A buffer for storing trajectories experienced by a DQN agent interacting
-    with the environment
-    """
-
-    def __init__(self, obs_dim, act_dim, size, hidden_size, device):
-
-        # Pick sampling episodes or time-steps
-        self.episode_batch = []
-
-        self.obs_dim = obs_dim
-        self.act_dim = act_dim
-        self.device = device
-        self.size = size
-
-        self.obs_buf = np.zeros(combined_shape(
-            size, obs_dim), dtype=np.float32)
-        self.next_obs_buf = np.zeros(
-            combined_shape(size, obs_dim), dtype=np.float32)
-        self.act_buf = np.zeros(combined_shape(
-            size, act_dim), dtype=np.float32)
-        self.rew_buf = np.zeros(size, dtype=np.float32)
-        self.done_buf = np.zeros(size, dtype=np.float32)
-
-        # RL^2 variables
-        self.prev_act_buf = np.zeros(
-            combined_shape(size, act_dim), dtype=np.float32)
-        self.prev_rew_buf = np.zeros(size, dtype=np.float32)
-        self.hxs_buf = np.zeros((size, hidden_size), dtype=np.float32)
-
-        self.ptr, self.path_start_idx, self.max_size = 0, 0, size
-
-    def store(self, obs, next_obs, act, rew, done, prev_act, prev_rew, hidden):
-        """
-        Append one timestep of agent-environment interaction to the buffer.
-        """
-        # buffer has to have room so you can store
-        assert self.ptr < self.max_size
-        self.obs_buf[self.ptr] = obs
-        self.next_obs_buf[self.ptr] = next_obs
-        self.act_buf[self.ptr] = act
-        self.rew_buf[self.ptr] = rew
-        self.done_buf[self.ptr] = done
-
-        self.prev_act_buf[self.ptr] = prev_act
-        self.prev_rew_buf[self.ptr] = prev_rew
-        self.hxs_buf[self.ptr] = hidden
-        self.ptr += 1
-
-    def finish_path(self):
-        path_slice = slice(self.path_start_idx, self.ptr)
-
-        data = dict(obs=self.obs_buf[path_slice],
-                    obs2=self.next_obs_buf[path_slice],
-                    act=self.act_buf[path_slice],
-                    rew=self.rew_buf[path_slice],
-                    done=self.done_buf[path_slice],
-                    prev_act=self.prev_act_buf[path_slice],
-                    prev_rew=self.prev_rew_buf[path_slice],
-                    hidden=self.hxs_buf[self.path_start_idx])
-
-        data = {k: torch.as_tensor(v, dtype=torch.float32).to(self.device)
-                for k, v in data.items()}
-        self.episode_batch.append(data)
-
-        self.path_start_idx = self.ptr
-
-    def get(self, batch_size=8):
-        """
-        Call this at the end of an epoch to get all of the data from
-        the buffer, with advantages appropriately normalized (shifted to have
-        mean zero and std one). Also, resets some pointers in the buffer.
-        """
-        # buffer has to be full before you can get
-        # assert self.ptr == self.max_size
-
-        np.random.shuffle(self.episode_batch)
-        return np.random.choice(self.episode_batch, batch_size)
-
-    def reset(self):
-        return NotImplemented
+from metanas.meta_optimizer.agents.core import count_vars
+from metanas.meta_optimizer.agents.buffer import EpisodicReplayBuffer
+from metanas.meta_optimizer.agents.DQN.core import RL2QNetwork
 
 
 class DQN(RL_agent):
     def __init__(self, config, env, logger_kwargs=dict(), seed=42, save_freq=1,
                  gamma=0.99, lr=5e-4, qnet_kwargs=dict(), polyak=0.995,
                  steps_per_epoch=4000, epochs=1, batch_size=8,
-                 replay_size=int(1e6), time_step=50, use_time_steps=True,
+                 replay_size=int(1e6), time_step=50, use_time_steps=False,
                  update_every=4, update_target=1000, update_after=3500,
                  epsilon=0.3, final_epsilon=0.05, epsilon_decay=0.9995):
         super().__init__(config, env, logger_kwargs,
@@ -197,7 +113,9 @@ class DQN(RL_agent):
         # Q_value for next_obs
         next_q_values, _ = self.online_network(
             next_obs, act, rew.view(-1, 1), h, training=True)
+        # print(next_q_values.shape)
         next_q_values = next_q_values.squeeze(0)
+        # print(next_q_values.shape)
 
         # argmax(Q_value(next_obs))
         next_action = torch.argmax(next_q_values, dim=-1)
@@ -291,7 +209,7 @@ class DQN(RL_agent):
                        self.global_steps+self.total_steps):
             h_in = h_out
 
-            a, h = self.get_action(o, a2, r2, h_in)
+            a, h_out = self.get_action(o, a2, r2, h_in)
             o2, r, d, _ = self.env.step(a)
             ep_ret += r
             ep_len += 1

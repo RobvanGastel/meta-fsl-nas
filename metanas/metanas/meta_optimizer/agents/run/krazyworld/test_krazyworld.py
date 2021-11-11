@@ -52,16 +52,8 @@ if __name__ == "__main__":
         ac_kwargs = dict(hidden_size=[args.hidden_size]*2)
         agent = SAC(None, env, ac_kwargs=ac_kwargs,
                     lr=3e-4,
-                    epochs=1,
+                    epochs=100,
                     hidden_size=args.hidden_size,
-                    steps_per_epoch=4000,
-                    start_steps=10000,
-                    update_after=1000,
-                    update_every=20,
-                    batch_size=32,
-                    replay_size=int(1e6),
-                    seed=42,
-                    num_test_episodes=10,
                     logger_kwargs=logger_kwargs)
     if args.agent == "DQN":
         qnet_kwargs = dict(hidden_size=args.hidden_size)

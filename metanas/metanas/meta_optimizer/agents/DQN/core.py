@@ -1,25 +1,7 @@
 import torch
 import torch.nn as nn
 
-import numpy as np
-
-
-def combined_shape(length, shape=None):
-    if shape is None:
-        return (length,)
-    return (length, shape) if np.isscalar(shape) else (length, *shape)
-
-
-def count_vars(module):
-    return sum([np.prod(p.shape) for p in module.parameters()])
-
-
-def mlp(sizes, activation, output_activation=nn.Identity):
-    layers = []
-    for j in range(len(sizes)-1):
-        act = activation if j < len(sizes)-2 else output_activation
-        layers += [nn.Linear(sizes[j], sizes[j+1]), act()]
-    return nn.Sequential(*layers)
+from metanas.meta_optimizer.agents.core import mlp
 
 
 class MLPQNetwork(nn.Module):
@@ -94,15 +76,12 @@ class RL2QNetwork(nn.Module):
         # Input rnn: (batch size, sequence length, features)
         if training:
             gru_input = gru_input.unsqueeze(0)
-            gru_out, _ = self.gru(gru_input, hid_in)
+            gru_out, hid_out = self.gru(gru_input, hid_in)
             gru_out = gru_out.squeeze(0)
         else:
             gru_input = gru_input.unsqueeze(1)
-            gru_out, _ = self.gru(gru_input, hid_in)
+            gru_out, hid_out = self.gru(gru_input, hid_in)
             gru_out = gru_out.squeeze(1)
-
-        # unroll the GRU network
-        gru_out, hid_out = self.gru(gru_input, hid_in)
 
         v = self.v(gru_out)
         a = self.a(gru_out)

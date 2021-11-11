@@ -6,9 +6,9 @@ import torch.nn as nn
 from torch.optim import Adam
 
 from metanas.meta_optimizer.agents.agent import RL_agent
+from metanas.meta_optimizer.agents.core import combined_shape
 from metanas.meta_optimizer.agents.PPO.core import (ActorCritic, aggregate_dicts,
                                                     discount_cumsum,
-                                                    combined_shape,
                                                     aggregate_info_dicts)
 
 

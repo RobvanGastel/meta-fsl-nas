@@ -4,11 +4,13 @@ import itertools
 import numpy as np
 
 import torch
-from torch.utils.tensorboard import SummaryWriter
 from torch.optim import Adam
 
-from metanas.meta_optimizer.agents.utils.logx import EpochLogger
-from metanas.meta_optimizer.agents.SAC.core import MLPActorCritic, count_vars, combined_shape
+
+from metanas.meta_optimizer.agents.core import (count_vars,
+                                                combined_shape)
+from metanas.meta_optimizer.agents.SAC.core import MLPActorCritic
+from metanas.metanas.meta_optimizer.agents.agent import RL_agent
 
 
 class ReplayBuffer:
@@ -32,13 +34,7 @@ class ReplayBuffer:
     def store(self, obs, act, rew, next_obs, done):
         self.obs_buf[self.ptr] = obs
         self.obs2_buf[self.ptr] = next_obs
-
-        # print(act)
-        # print(self.act_buf.shape)
-
         self.act_buf[self.ptr] = act
-
-        # print(self.act_buf[self.ptr])
         self.rew_buf[self.ptr] = rew
         self.done_buf[self.ptr] = done
         self.ptr = (self.ptr+1) % self.max_size
@@ -55,33 +51,24 @@ class ReplayBuffer:
                 for k, v in batch.items()}
 
 
-class SAC:
-    def __init__(self, env, test_env, ac_kwargs=dict(), max_ep_len=500,
+class SAC(RL_agent):
+    def __init__(self, config, env, test_env, ac_kwargs=dict(),
                  steps_per_epoch=4000, epochs=100, replay_size=int(1e6),
                  gamma=0.99, polyak=0.995, lr=3e-3, alpha=0.2, batch_size=100,
                  start_steps=10000, update_after=1000, update_every=50,
                  num_test_episodes=10, logger_kwargs=dict(), save_freq=1,
                  seed=42):
+        super().__init__(config, env, logger_kwargs,
+                         seed, gamma, lr, save_freq)
 
-        self.env = env
         self.test_env = test_env
-        self.max_ep_len = max_ep_len
         self.epochs = epochs
         self.batch_size = batch_size
-        self.lr = lr
-        self.gamma = gamma
         self.num_test_episodes = num_test_episodes
         self.steps_per_epoch = steps_per_epoch
         self.total_steps = steps_per_epoch * epochs
 
-        self.device = torch.device(
-            "cuda" if torch.cuda.is_available() else "cpu")
-
-        torch.manual_seed(seed)
-        np.random.seed(seed)
-
         self.polyak = polyak
-        self.save_freq = save_freq
         self.update_every = update_every
         self.start_steps = start_steps
         self.update_after = update_after
@@ -95,15 +82,8 @@ class SAC:
         self.pi_optimizer = Adam(self.ac.pi.parameters(), lr=self.lr)
         self.q_optimizer = Adam(self.q_params, lr=self.lr)
 
-        # SpinngingUp logging & Tensorboard
-        self.logger = EpochLogger(**logger_kwargs)
-        self.logger.save_config(locals())
-
         # Set up model saving
         self.logger.setup_pytorch_saver(self.ac)
-
-        self.summary_writer = SummaryWriter(
-            log_dir=logger_kwargs['output_dir'], flush_secs=1)
 
         # Freeze target networks with respect to optimizers
         # (only update via polyak averaging)
@@ -183,10 +163,13 @@ class SAC:
             q_pi = torch.min(q1_pi, q2_pi)
 
         # Entropy-regularized policy loss
-        loss_pi = (pi * (self.alpha.detach() * logp_pi - q_pi)).sum(-1).mean()
+        entropy = -torch.sum(pi * logp_pi, dim=1, keepdim=True)
 
-        # Entropy
-        entropy = -torch.sum(pi * logp_pi, dim=1)
+        # Expectations of Q
+        q = torch.sum(q_pi * pi, dim=1, keepdim=True)
+
+        # Entropy-regularized policy loss
+        loss_pi = (- q - self.alpha * entropy).mean()
 
         # Useful info for logging
         pi_info = dict(LogPi=logp_pi.cpu().detach().numpy(),
@@ -226,7 +209,7 @@ class SAC:
 
         # Entropy values
         alpha_loss = -(self.log_alpha * (logp_pi.detach() +
-                       self.entropy_target)).mean()
+                                         self.entropy_target)).mean()
 
         self.alpha_optimizer.zero_grad()
         alpha_loss.backward()

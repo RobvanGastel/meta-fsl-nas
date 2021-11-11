@@ -6,7 +6,8 @@ import time
 import random
 
 from metanas.meta_optimizer.agents.agent import RL_agent
-from metanas.meta_optimizer.agents.DQN.core import MLPQNetwork, count_vars
+from metanas.meta_optimizer.agents.core import count_vars
+from metanas.meta_optimizer.agents.DQN.core import MLPQNetwork
 
 
 class ReplayBuffer:

@@ -9,7 +9,8 @@ import time
 import random
 
 from metanas.meta_optimizer.agents.agent import RL_agent
-from metanas.meta_optimizer.agents.DQN.core import LSTMQNetwork, count_vars
+from metanas.meta_optimizer.agents.core import count_vars
+from metanas.meta_optimizer.agents.DQN.core import LSTMQNetwork
 
 
 class EpisodicReplayBuffer:

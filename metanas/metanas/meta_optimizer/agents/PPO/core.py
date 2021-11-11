@@ -4,15 +4,8 @@ import torch.nn as nn
 import numpy as np
 import scipy.signal
 
+from metanas.meta_optimizer.agents.core import mlp
 from torch.distributions.categorical import Categorical
-
-
-def mlp(sizes, activation, output_activation=nn.Identity):
-    layers = []
-    for j in range(len(sizes)-1):
-        act = activation if j < len(sizes)-2 else output_activation
-        layers += [nn.Linear(sizes[j], sizes[j+1]), act()]
-    return nn.Sequential(*layers)
 
 
 def discount_cumsum(x, discount):
@@ -49,12 +42,6 @@ def aggregate_info_dicts(dicts):
 
     return {k: v.item() if isinstance(v, torch.Tensor) else v
             for k, v in agg_dict.items()}
-
-
-def combined_shape(length, shape=None):
-    if shape is None:
-        return (length,)
-    return (length, shape) if np.isscalar(shape) else (length, *shape)
 
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
