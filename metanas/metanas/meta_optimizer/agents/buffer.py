@@ -5,17 +5,19 @@ import numpy as np
 from metanas.meta_optimizer.agents.core import combined_shape
 
 
-class EpisodicReplayBuffer:
+class EpisodicBuffer:
     """
     A buffer for storing trajectories experienced by a DQN/SAC agent
     interacting with the environment
     """
 
     def __init__(self, obs_dim, act_dim, size, hidden_size, device,
-                 use_sac=False):
+                 use_sac=False, use_exploration_sampling=False):
 
         # Pick sampling episodes or time-steps
-        self.episode_batch = []
+        self.exploration_batch = []
+        self.exploitation_batch = []
+
         self.use_sac = use_sac
 
         self.obs_dim = obs_dim
@@ -25,8 +27,8 @@ class EpisodicReplayBuffer:
 
         self.obs_buf = np.zeros(combined_shape(
             size, obs_dim), dtype=np.float32)
-        self.next_obs_buf = np.zeros(
-            combined_shape(size, obs_dim), dtype=np.float32)
+        self.next_obs_buf = np.zeros(combined_shape(
+            size, obs_dim), dtype=np.float32)
         self.act_buf = np.zeros(combined_shape(
             size, act_dim), dtype=np.float32)
         self.rew_buf = np.zeros(size, dtype=np.float32)
@@ -42,6 +44,7 @@ class EpisodicReplayBuffer:
 
         self.hxs_buf = np.zeros((size, hidden_size), dtype=np.float32)
 
+        self.use_exploration_sampling = use_exploration_sampling
         self.ptr, self.path_start_idx, self.max_size = 0, 0, size
 
     def store(self, obs, next_obs, act, rew, done, prev_act, prev_rew, hidden):
@@ -68,36 +71,87 @@ class EpisodicReplayBuffer:
 
         self.ptr += 1
 
-    def finish_path(self):
+    def finish_path_sac(self):
+
         path_slice = slice(self.path_start_idx, self.ptr)
 
-        if self.use_sac:
+        # Exploitation batch
+        data = dict(obs=self.obs_buf[path_slice],
+                    obs2=self.next_obs_buf[path_slice],
+                    act=self.act_buf[path_slice],
+                    rew=self.rew_buf[path_slice],
+                    done=self.done_buf[path_slice],
+                    prev_act=self.prev_act_buf[path_slice],
+                    prev_rew=self.prev_rew_buf[path_slice],
+                    hid=self.hxs_buf[self.path_start_idx],
+                    hid_out=self.next_hxs_buf[self.path_start_idx])
+        data = {k: torch.as_tensor(v, dtype=torch.float32).to(self.device)
+                for k, v in data.items()}
+        self.exploitation_batch.append(data)
+
+        if self.use_exploration_sampling:
+            # Exploration batch
+            # set the return of the episode to 0
+            rews_zero = np.zeros_like(self.rew_buf[path_slice])
+
             data = dict(obs=self.obs_buf[path_slice],
                         obs2=self.next_obs_buf[path_slice],
                         act=self.act_buf[path_slice],
-                        rew=self.rew_buf[path_slice],
+                        rew=rews_zero,
                         done=self.done_buf[path_slice],
                         prev_act=self.prev_act_buf[path_slice],
                         prev_rew=self.prev_rew_buf[path_slice],
                         hid=self.hxs_buf[self.path_start_idx],
                         hid_out=self.next_hxs_buf[self.path_start_idx])
-        else:
+            data = {k: torch.as_tensor(v, dtype=torch.float32).to(self.device)
+                    for k, v in data.items()}
+            self.exploration_batch.append(data)
+
+        self.path_start_idx = self.ptr
+
+    def finish_path(self):
+
+        if self.use_sac:
+            self.finish_path_sac()
+            return
+
+        # Exploitation batch
+        path_slice = slice(self.path_start_idx, self.ptr)
+        rews_zero = np.zeros_like(self.rew_buf[path_slice])
+
+        data = dict(obs=self.obs_buf[path_slice],
+                    obs2=self.next_obs_buf[path_slice],
+                    act=self.act_buf[path_slice],
+                    rew=self.rew_buf[path_slice],
+                    done=self.done_buf[path_slice],
+                    prev_act=self.prev_act_buf[path_slice],
+                    prev_rew=self.prev_rew_buf[path_slice],
+                    hidden=self.hxs_buf[self.path_start_idx])
+
+        data = {k: torch.as_tensor(v, dtype=torch.float32).to(self.device)
+                for k, v in data.items()}
+        self.exploitation_batch.append(data)
+
+        if self.use_exploration_sampling:
+            # Exploration batch
+            # set the return of the episode to 0
+            rews_zero = np.zeros_like(self.rew_buf[path_slice])
+
             data = dict(obs=self.obs_buf[path_slice],
                         obs2=self.next_obs_buf[path_slice],
                         act=self.act_buf[path_slice],
-                        rew=self.rew_buf[path_slice],
+                        rew=rews_zero,
                         done=self.done_buf[path_slice],
                         prev_act=self.prev_act_buf[path_slice],
                         prev_rew=self.prev_rew_buf[path_slice],
                         hidden=self.hxs_buf[self.path_start_idx])
-
-        data = {k: torch.as_tensor(v, dtype=torch.float32).to(self.device)
-                for k, v in data.items()}
-        self.episode_batch.append(data)
+            data = {k: torch.as_tensor(v, dtype=torch.float32).to(self.device)
+                    for k, v in data.items()}
+            self.exploration_batch.append(data)
 
         self.path_start_idx = self.ptr
 
-    def get(self, batch_size=8):
+    def get(self, batch_size=None):
         """
         Call this at the end of an epoch to get all of the data from
         the buffer, with advantages appropriately normalized (shifted to have
@@ -106,8 +160,48 @@ class EpisodicReplayBuffer:
         # buffer has to be full before you can get
         # assert self.ptr == self.max_size
 
-        np.random.shuffle(self.episode_batch)
-        return np.random.choice(self.episode_batch, batch_size)
+        if self.use_exploration_sampling:
+            # use_exploration_sampling
+            if batch_size is not None:
+                k = batch_size
+                # 30 % explore batches
+                p = k//3
+
+                # p explore-rollouts
+                explore = np.random.choice(self.exploration_batch, p)
+                # k-p exploit-rollouts
+                exploit = np.random.choice(self.exploitation_batch, k-p)
+                return [*explore, *exploit]
+
+            k = len(self.exploitation_batch)
+            # 30 % explore batches
+            p = k//3
+
+            # p explore-rollouts
+            explore = np.random.choice(self.exploration_batch, p)
+            # k-p exploit-rollouts
+            exploit = np.random.choice(self.exploitation_batch, k-p)
+            return [*explore, *exploit]
+        if batch_size is not None:
+            np.random.shuffle(self.exploitation_batch)
+            return np.random.choice(self.exploitation_batch, batch_size)
+
+        np.random.shuffle(self.exploitation_batch)
+        return self.exploitation_batch
 
     def reset(self):
-        return NotImplemented
+        self.obs_buf = np.zeros_like(self.obs_buf)
+        self.next_obs_buf = np.zeros_like(self.next_obs_buf)
+        self.act_buf = np.zeros_like(self.act_buf)
+        self.rew_buf = np.zeros_like(self.rew_buf)
+        self.done_buf = np.zeros_like(self.done_buf)
+        self.prev_act_buf = np.zeros_like(self.prev_act_buf)
+        self.prev_rew_buf = np.zeros_like(self.prev_rew_buf)
+
+        if self.use_sac:
+            self.next_hxs_buf = np.zeros_like(self.next_hxs_buf)
+        self.hxs_buf = np.zeros_like(self.hxs_buf)
+
+        self.exploration_batch = []
+        self.exploitation_batch = []
+        self.ptr, self.path_start_idx, self.max_size = 0, 0, self.size

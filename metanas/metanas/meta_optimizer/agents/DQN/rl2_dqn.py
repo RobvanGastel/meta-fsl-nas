@@ -7,7 +7,7 @@ import time
 
 from metanas.meta_optimizer.agents.agent import RL_agent
 from metanas.meta_optimizer.agents.core import count_vars
-from metanas.meta_optimizer.agents.buffer import EpisodicReplayBuffer
+from metanas.meta_optimizer.agents.buffer import EpisodicBuffer
 from metanas.meta_optimizer.agents.DQN.core import RL2QNetwork
 
 
@@ -48,7 +48,7 @@ class DQN(RL_agent):
         # TODO: Time steps currently not used in the
         # replay buffer to stay close to the idea of updating
         # on the whole trajectories for meta-learning purposes
-        self.buffer = EpisodicReplayBuffer(
+        self.buffer = EpisodicBuffer(
             obs_dim, act_dim, replay_size, self.hidden_size, self.device)
 
         # Set epsilon greedy decaying parameters
@@ -113,9 +113,7 @@ class DQN(RL_agent):
         # Q_value for next_obs
         next_q_values, _ = self.online_network(
             next_obs, act, rew.view(-1, 1), h, training=True)
-        # print(next_q_values.shape)
         next_q_values = next_q_values.squeeze(0)
-        # print(next_q_values.shape)
 
         # argmax(Q_value(next_obs))
         next_action = torch.argmax(next_q_values, dim=-1)
@@ -190,11 +188,9 @@ class DQN(RL_agent):
     #             a2 = a
     #         self.logger.store(TestEpRet=ep_ret, TestEpLen=ep_len)
 
-    def train_agent(self, env=None):
+    def train_agent(self, env):
 
-        if env is not None:
-            self.env = env
-
+        self.env = env
         o, ep_ret, ep_len = self.env.reset(), 0, 0
 
         # RL^2 variables
@@ -202,7 +198,7 @@ class DQN(RL_agent):
         h_out = torch.zeros([1, 1, self.hidden_size]).to(self.device)
 
         start_time = time.time()
-        a2 = self.env.action_space.sample()
+        a2 = 0
         r2 = 0
 
         for t in range(self.global_steps,

@@ -10,24 +10,25 @@ from torch.optim import Adam
 
 from metanas.meta_optimizer.agents.agent import RL_agent
 from metanas.meta_optimizer.agents.core import count_vars
-from metanas.meta_optimizer.agents.buffer import EpisodicReplayBuffer
+from metanas.meta_optimizer.agents.buffer import EpisodicBuffer
 from metanas.meta_optimizer.agents.SAC.core import ActorCritic
 
 
 class SAC(RL_agent):
     def __init__(self, config, env, logger_kwargs=dict(), seed=42, save_freq=1,
-                 gamma=0.99, lr=1e-3, ac_kwargs=dict(), polyak=0.995,
-                 steps_per_epoch=4000, epochs=1, batch_size=8,
+                 gamma=0.99, lr=1e-4, ac_kwargs=dict(), polyak=0.995,
+                 steps_per_epoch=4000, epochs=1, batch_size=16,
                  replay_size=int(1e6), time_step=50, use_time_steps=False,
                  hidden_size=256, start_steps=10000, update_after=1000,
-                 update_every=50
-                 ):
+                 update_every=50, use_exploration_sampling=False,
+                 reset_buffer=False, clip_ratio=1.0):
         super().__init__(config, env, logger_kwargs,
                          seed, gamma, lr, save_freq)
 
         # TODO: Pick number of steps or trajectories per trial
 
         # Meta-learning parameters
+        self.epochs = epochs
         # Number of steps per trial
         self.steps_per_epoch = steps_per_epoch
         # if epochs = 1, every task runs a single trial
@@ -35,14 +36,20 @@ class SAC(RL_agent):
         # Track the steps of all trials combined
         self.global_steps = 0
 
+        # Meta-testing
+        # Increase global steps for the next trial
+        self.global_test_steps = 0
+
         # Updating the network parameters
         self.polyak = polyak
+        self.clip_ratio = clip_ratio
         self.update_counter = 0
         self.update_multiplier = 20
         self.start_steps = start_steps
         self.update_every = update_every
         self.update_after = update_after
 
+        self.reset_buffer = reset_buffer
         self.batch_size = batch_size
         self.use_time_steps = use_time_steps
         self.hidden_size = hidden_size
@@ -67,20 +74,19 @@ class SAC(RL_agent):
         # TODO: Time steps currently not used in the
         # replay buffer to stay close to the idea of updating
         # on the whole trajectories for meta-learning purposes
-        self.buffer = EpisodicReplayBuffer(
+        self.buffer = EpisodicBuffer(
             obs_dim, act_dim, replay_size, self.hidden_size, self.device,
-            use_sac=True)
+            use_sac=True, use_exploration_sampling=use_exploration_sampling)
 
         # Optimize entropy exploration-exploitation parameter
-        self.entropy_target = 0.95 * (-np.log(1 / self.env.action_space.n))
+        self.entropy_target = 0.98 * (-np.log(1 / self.env.action_space.n))
         self.log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
         self.alpha = self.log_alpha.exp()
         self.alpha_optimizer = Adam([self.log_alpha], lr=self.lr)
 
         # List of parameters for both Q-networks (save this for convenience)
         self.q_params = itertools.chain(self.ac.q1.parameters(),
-                                        self.ac.q2.parameters(),
-                                        self.ac.memory.parameters())
+                                        self.ac.q2.parameters())
 
         self.pi_params = itertools.chain(self.ac.pi.parameters(),
                                          self.ac.memory.parameters())
@@ -89,13 +95,13 @@ class SAC(RL_agent):
         self.pi_optimizer = Adam(self.pi_params, lr=self.lr)
         self.q_optimizer = Adam(self.q_params, lr=self.lr)
 
-        self.optimizer = Adam(self.ac.parameters(), lr=self.lr)
-
         # Count variables
         var_counts = tuple(count_vars(module)
-                           for module in [self.ac.pi, self.ac.q1, self.ac.q2])
+                           for module in [self.ac.pi, self.ac.q1,
+                                          self.ac.q2, self.ac.memory])
         self.logger.log(
-            '\nNumber of parameters: \t pi: %d, \t q1: %d, \t q2: %d\n' % var_counts)
+            '\n# of parameters: \t pi: %d, \t q1: %d, \t q2: %d, \t mem: %d\n'
+            % var_counts)
 
     def compute_critic_loss(self, batch):
         obs, act, rew = batch['obs'], batch['act'], batch['rew']
@@ -103,17 +109,14 @@ class SAC(RL_agent):
 
         # RL^2 variables
         prev_act, prev_rew = batch['prev_act'], batch['prev_rew'].view(-1, 1)
-        h_out = batch['hid_out'].view(1, 1, 256)
-        h_in = batch['hid'].view(1, 1, 256)
+        h_out = batch['hid_out'].view(1, 1, self.hidden_size)
+        h_in = batch['hid'].view(1, 1, self.hidden_size)
 
         rew = rew.view(-1, 1)
 
-        memory_emb, _ = self.ac.memory(
-            obs, prev_act, prev_rew, h_in, training=True)
-
         # Current online network q values
-        q1 = self.ac.q1(memory_emb)
-        q2 = self.ac.q2(memory_emb)
+        q1 = self.ac.q1(obs)
+        q2 = self.ac.q2(obs)
 
         q1 = q1.gather(1, act.view(-1, 1).long())
         q2 = q2.gather(1, act.view(-1, 1).long())
@@ -125,8 +128,8 @@ class SAC(RL_agent):
             _, a2, logp_a2 = self.ac.pi.sample(memory_emb_pi)
 
             # Target Q-values
-            q1_targ = self.ac_targ.q1(memory_emb)
-            q2_targ = self.ac_targ.q2(memory_emb)
+            q1_targ = self.ac_targ.q1(next_obs)
+            q2_targ = self.ac_targ.q2(next_obs)
             q_targ = torch.min(q1_targ, q2_targ)
 
             # To map R^|A| -> R
@@ -153,15 +156,15 @@ class SAC(RL_agent):
 
         # RL^2 variables
         prev_act, prev_rew = batch['prev_act'], batch['prev_rew'].view(-1, 1)
-        h_in = batch['hid'].view(1, 1, 256)
+        h_in = batch['hid'].view(1, 1, self.hidden_size)
 
         memory_emb, _ = self.ac.memory(
             obs, prev_act, prev_rew, h_in, training=True)
         _, pi, logp_pi = self.ac.pi.sample(memory_emb)
 
         with torch.no_grad():
-            q1_pi = self.ac.q1(memory_emb)
-            q2_pi = self.ac.q2(memory_emb)
+            q1_pi = self.ac.q1(obs)
+            q2_pi = self.ac.q2(obs)
             q_pi = torch.min(q1_pi, q2_pi)
 
         # Expectation of entropy
@@ -174,8 +177,8 @@ class SAC(RL_agent):
         loss_pi = (- q - self.alpha * entropy).mean()
 
         # Useful info for logging
-        pi_info = dict(LogPi=logp_pi.cpu().detach().mean().numpy(),
-                       entropy=entropy.cpu().detach().mean().numpy())
+        pi_info = dict(LogPi=logp_pi.cpu().detach().numpy(),
+                       entropy=entropy.cpu().detach().numpy())
 
         return loss_pi, logp_pi, pi_info
 
@@ -189,7 +192,7 @@ class SAC(RL_agent):
 
             self.q_optimizer.zero_grad()
             loss_q.backward()
-            nn.utils.clip_grad_norm_(self.ac.parameters(), 1.0)
+            nn.utils.clip_grad_norm_(self.ac.parameters(), self.clip_ratio)
             self.q_optimizer.step()
 
             # Recording Q-values
@@ -206,7 +209,7 @@ class SAC(RL_agent):
             loss_pi, logp_pi, pi_info = self.compute_policy_loss(episode)
 
             loss_pi.backward()
-            nn.utils.clip_grad_norm_(self.ac.parameters(), 1.0)
+            nn.utils.clip_grad_norm_(self.ac.parameters(), self.clip_ratio)
             self.pi_optimizer.step()
 
             # Unfreeze Q-networks so you can optimize it at next DDPG step.
@@ -260,138 +263,191 @@ class SAC(RL_agent):
         return self.ac.act(obs, prev_act, prev_rew, hid_in) if greedy \
             else self.ac.explore(obs, prev_act, prev_rew, hid_in)
 
-    # def test_agent(self):
-    #     h = torch.zeros([1, 1, self.hidden_size]).to(self.device)
-    #     a2 = self.test_env.action_space.sample()
-    #     r2 = 0
+    def test_agent(self, test_env, num_test_episodes=10):
+        self.test_env = test_env
 
-    #     for _ in range(self.num_test_episodes):
-    #         o, d, ep_ret, ep_len = self.test_env.reset(), False, 0, 0
+        h = torch.zeros([1, 1, self.hidden_size]).to(self.device)
+        start_time = time.time()
+        a2, r2 = 0, 0
 
-    #         while not(d or (ep_len == self.max_ep_len)):
-    #             a, h = self.get_action(
-    #                 o, a2, r2, h, greedy=True)
+        for _ in range(num_test_episodes):
+            o, d, ep_ret, ep_len = self.test_env.reset(), False, 0, 0
+            ep_max_acc = 0
 
-    #             o2, r, d, _ = self.test_env.step(a)
+            while not(d or (ep_len == self.max_ep_len)):
+                a, h = self.get_action(
+                    o, a2, r2, h, greedy=True)
 
-    #             o = o2
-    #             r2 = r
-    #             a2 = a
+                o2, r, d, info_dict = self.test_env.step(a)
 
-    #             ep_ret += r
-    #             ep_len += 1
-    #         self.logger.store(TestEpRet=ep_ret, TestEpLen=ep_len)
+                o = o2
+                r2 = r
+                a2 = a
+
+                ep_ret += r
+                ep_len += 1
+
+                # DARTS information
+                if 'acc' in info_dict:
+                    acc = info_dict['acc']
+                    if acc is not None and acc > ep_max_acc:
+                        ep_max_acc = acc
+
+                self.global_test_steps += 1
+
+            self.logger.store(TestEpRet=ep_ret, TestEpLen=ep_len,
+                              TestEpMaxAcc=ep_max_acc)
+        self._log_test_trial(self.global_test_steps, start_time)
 
     def train_agent(self, env=None):
+        assert env is not None, "Pass a task for the current trial"
 
-        if env is not None:
-            self.env = env
-
+        self.env = env
+        start_time = time.time()
         o, ep_ret, ep_len, ep_max_acc = self.env.reset(), 0, 0, 0
 
         # RL^2 variables
         h_in = torch.zeros([1, 1, self.hidden_size]).to(self.device)
         h_out = torch.zeros([1, 1, self.hidden_size]).to(self.device)
 
+        if self.reset_buffer:
+            self.buffer.reset()
+
         self.start_time = time.time()
-        a2 = self.env.action_space.sample()
-        r2 = 0
+        a2, r2 = 0, 0
 
-        for t in range(self.global_steps,
-                       self.global_steps+self.total_steps):
-            h_in = h_out
+        for epoch in range(self.epochs):
+            for t in range(self.steps_per_epoch):
+                h_in = h_out
 
-            # Until start_steps have elapsed, randomly sample actions
-            # from a uniform distribution for better exploration. Afterwards,
-            # use the learned policy.
-            if t > self.start_steps:
-                a, h_out = self.get_action(o, a2, r2, h_in, greedy=False)
-            else:
-                a = self.env.action_space.sample()
+                # Until start_steps have elapsed, randomly sample actions
+                # from a uniform distribution for better exploration. Afterwards,
+                # use the learned policy.
+                if self.global_steps > self.start_steps:
+                    a, h_out = self.get_action(o, a2, r2, h_in, greedy=False)
+                else:
+                    a = self.env.action_space.sample()
 
-            o2, r, d, info_dict = self.env.step(a)
-            ep_ret += r
-            ep_len += 1
+                o2, r, d, info_dict = self.env.step(a)
+                ep_ret += r
+                ep_len += 1
 
-            # DARTS information
-            if 'acc' in info_dict:
-                acc = info_dict['acc']
-                if acc is not None and acc > ep_max_acc:
-                    ep_max_acc = acc
+                # DARTS information
+                if 'acc' in info_dict:
+                    acc = info_dict['acc']
+                    if acc is not None and acc > ep_max_acc:
+                        ep_max_acc = acc
 
-            # Ignore the "done" signal if it comes from hitting the time
-            # horizon (that is, when it's an artificial terminal signal
-            # that isn't based on the agent's state)
-            d = False if ep_len == self.max_ep_len else d
+                # Ignore the "done" signal if it comes from hitting the time
+                # horizon (that is, when it's an artificial terminal signal
+                # that isn't based on the agent's state)
+                d = False if ep_len == self.max_ep_len else d
 
-            self.buffer.store(o, o2, a, r, d, a2, r2, (h_in.cpu().numpy(),
-                                                       h_out.cpu().numpy()))
+                self.buffer.store(o, o2, a, r, d, a2, r2, (h_in.cpu().numpy(),
+                                                           h_out.cpu().numpy()))
 
-            # Super critical, easy to overlook step: make sure to update
-            # most recent observation!
-            o = o2
-            # Set previous action and reward
-            r2 = r
-            a2 = a
+                # Super critical, easy to overlook step: make sure to update
+                # most recent observation!
+                o = o2
+                # Set previous action and reward
+                r2 = r
+                a2 = a
 
-            # End of trajectory handling
-            if d or (ep_len == self.max_ep_len):
-                self.buffer.finish_path()
+                epoch_ended = t == self.steps_per_epoch-1
 
-                self.logger.store(EpRet=ep_ret, EpLen=ep_len,
-                                  MaxAcc=ep_max_acc)
-                o, ep_ret, ep_len, ep_max_acc = self.env.reset(), 0, 0, 0
+                # End of trajectory handling
+                if d or (ep_len == self.max_ep_len) or epoch_ended:
+                    self.buffer.finish_path()
 
-            # Update handling
-            if t >= self.update_after and t % self.update_every == 0:
-                for _ in range(self.update_multiplier):
-                    self.update()
+                    if d or (ep_len == self.max_ep_len):
+                        self.logger.store(EpRet=ep_ret, EpLen=ep_len,
+                                          EpMaxAcc=ep_max_acc)
+                    o, ep_ret, ep_len, ep_max_acc = self.env.reset(), 0, 0, 0
 
-            # End of trial handling
-            if (t+1) % self.steps_per_epoch == 0:
-                trial = (t+1) // self.steps_per_epoch
+                # Update handling
+                if self.global_steps >= self.update_after and \
+                        self.global_steps % self.update_every == 0:
+                    for _ in range(self.update_multiplier):
+                        self.update()
 
-                # Save model
-                if (trial % self.save_freq == 0) or (trial == self.epochs):
-                    self.logger.save_state({'env': self.env}, None)
+                # Increase global steps for the next trial
+                self.global_steps += 1
 
-                # Log info about the current trial
-                log_perf_board = ['EpRet', 'EpLen', 'MaxAcc', 'Q2Vals',
-                                  'Q1Vals', 'LogPi']
-                log_loss_board = ['LossPi', 'LossQ']
-                log_board = {'Performance': log_perf_board,
-                             'Loss': log_loss_board}
+            self._log_trial(self.global_steps, start_time)
 
-                # Update tensorboard
-                for key, value in log_board.items():
-                    for val in value:
-                        mean, std = self.logger.get_stats(val)
+    def _log_trial(self, t, start_time):
+        trial = (t+1) // self.steps_per_epoch
 
-                        if key == 'Performance':
-                            self.summary_writer.add_scalar(
-                                key+'/Average'+val, mean, t)
-                            self.summary_writer.add_scalar(
-                                key+'/Std'+val, std, t)
-                        else:
-                            self.summary_writer.add_scalar(
-                                key+'/'+val, mean, t)
+        # Save model
+        if (trial % self.save_freq == 0) or (trial == self.epochs):
+            self.logger.save_state({'env': self.env}, None)
 
-                self.logger.log_tabular('Trial', trial)
-                self.logger.log_tabular('EpRet', with_min_and_max=True)
-                self.logger.log_tabular('EpLen', average_only=True)
-                # Ignore this metric for non-NAS environments
-                self.logger.log_tabular('MaxAcc', with_min_and_max=True)
-                self.logger.log_tabular('TotalEnvInteracts', t)
-                self.logger.log_tabular('Q2Vals', with_min_and_max=True)
-                self.logger.log_tabular('Q1Vals', with_min_and_max=True)
-                self.logger.log_tabular('LogPi', with_min_and_max=True)
-                self.logger.log_tabular('Alpha', average_only=True)
-                self.logger.log_tabular('LossAlpha', average_only=True)
-                self.logger.log_tabular('LossPi', average_only=True)
-                self.logger.log_tabular('LossQ', average_only=True)
+        # Log info about the current trial
+        log_perf_board = ['EpRet', 'EpLen', 'EpMaxAcc', 'Q2Vals',
+                          'Q1Vals', 'LogPi']
+        log_loss_board = ['LossPi', 'LossQ']
+        log_board = {'Performance': log_perf_board,
+                     'Loss': log_loss_board}
 
-                self.logger.log_tabular('Time', time.time()-self.start_time)
-                self.logger.dump_tabular()
+        # Update tensorboard
+        for key, value in log_board.items():
+            for val in value:
+                mean, std = self.logger.get_stats(val)
 
-        # Increase global steps for the next trial
-        self.global_steps += self.total_steps
+                if key == 'Performance':
+                    self.summary_writer.add_scalar(
+                        key+'/Average'+val, mean, t)
+                    self.summary_writer.add_scalar(
+                        key+'/Std'+val, std, t)
+                else:
+                    self.summary_writer.add_scalar(
+                        key+'/'+val, mean, t)
+
+        self.logger.log_tabular('Trial', trial)
+        self.logger.log_tabular('EpRet', with_min_and_max=True)
+        self.logger.log_tabular('EpLen', average_only=True)
+        # Ignore this metric for non-NAS environments
+        self.logger.log_tabular('EpMaxAcc', with_min_and_max=True)
+        self.logger.log_tabular('TotalEnvInteracts', t)
+        self.logger.log_tabular('Q2Vals', with_min_and_max=True)
+        self.logger.log_tabular('Q1Vals', with_min_and_max=True)
+        self.logger.log_tabular('LogPi', with_min_and_max=True)
+        self.logger.log_tabular('Alpha', average_only=True)
+        self.logger.log_tabular('LossAlpha', average_only=True)
+        self.logger.log_tabular('LossPi', average_only=True)
+        self.logger.log_tabular('LossQ', average_only=True)
+
+        self.logger.log_tabular('Time', time.time()-start_time)
+        self.logger.dump_tabular()
+
+    def _log_test_trial(self, t, start_time):
+        trial = (t+1) // self.steps_per_epoch
+
+        # Save model
+        if (trial % self.save_freq == 0) or (trial == self.epochs):
+            self.logger.save_state({'env': self.env}, None)
+
+        # Log info about the current trial
+        log_board = {
+            'Performance': ['TestEpRet', 'TestEpLen', 'TestEpMaxAcc']}
+
+        # Update tensorboard
+        for key, value in log_board.items():
+            for val in value:
+                mean, std = self.logger.get_stats(val)
+
+                if key == 'Performance':
+                    self.summary_writer.add_scalar(
+                        key+'/Average'+val, mean, t)
+                    self.summary_writer.add_scalar(
+                        key+'/Std'+val, std, t)
+                else:
+                    self.summary_writer.add_scalar(
+                        key+'/'+val, mean, t)
+
+        self.logger.log_tabular('TestEpRet', with_min_and_max=True)
+        self.logger.log_tabular('TestEpLen', average_only=True)
+        # Ignore this metric for non-NAS environments
+        self.logger.log_tabular('TestEpMaxAcc', with_min_and_max=True)
+        self.logger.log_tabular('Time', time.time()-start_time)
+        self.logger.dump_tabular()

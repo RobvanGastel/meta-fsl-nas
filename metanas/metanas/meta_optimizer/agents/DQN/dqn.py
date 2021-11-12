@@ -156,7 +156,8 @@ class DQN(RL_agent):
                 ep_len += 1
             self.logger.store(TestEpRet=ep_ret, TestEpLen=ep_len)
 
-    def train_agent(self):
+    def train_agent(self, env):
+        self.env = env
         start_time = time.time()
         o, ep_ret, ep_len = self.env.reset(), 0, 0
 

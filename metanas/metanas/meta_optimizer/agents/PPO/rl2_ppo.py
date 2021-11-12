@@ -6,8 +6,9 @@ import torch.nn as nn
 from torch.optim import Adam
 
 from metanas.meta_optimizer.agents.agent import RL_agent
-from metanas.meta_optimizer.agents.core import combined_shape
-from metanas.meta_optimizer.agents.PPO.core import (ActorCritic, aggregate_dicts,
+from metanas.meta_optimizer.agents.core import (combined_shape)
+from metanas.meta_optimizer.agents.PPO.core import (ActorCritic,
+                                                    aggregate_dicts,
                                                     discount_cumsum,
                                                     aggregate_info_dicts)
 
@@ -20,10 +21,11 @@ class RolloutBuffer:
     """
 
     def __init__(self, obs_dim, act_dim, size, hidden_size, device,
-                 gamma=0.99, lam=0.95):
+                 use_exploration_sampling=False, gamma=0.99, lam=0.95):
 
         # Pick sampling episodes or time-steps
-        self.episode_batch = []
+        self.exploration_batch = []
+        self.exploitation_batch = []
 
         self.device = device
         self.obs_dim = obs_dim
@@ -47,6 +49,7 @@ class RolloutBuffer:
         self.prev_rew_buf = np.zeros(size, dtype=np.float32)
         self.hxs_buf = np.zeros((size, hidden_size), dtype=np.float32)
 
+        self.use_exploration_sampling = use_exploration_sampling
         self.gamma, self.lam = gamma, lam
         self.ptr, self.path_start_idx, self.max_size = 0, 0, size
 
@@ -87,6 +90,8 @@ class RolloutBuffer:
         rews = np.append(self.rew_buf[path_slice], last_val)
         vals = np.append(self.val_buf[path_slice], last_val)
 
+        # EXPLOITATION calculation
+
         # the next two lines implement GAE-Lambda advantage calculation
         deltas = rews[:-1] + self.gamma * vals[1:] - vals[:-1]
         self.adv_buf[path_slice] = discount_cumsum(deltas,
@@ -111,7 +116,39 @@ class RolloutBuffer:
 
         data = {k: torch.as_tensor(v, dtype=torch.float32).to(self.device)
                 for k, v in data.items()}
-        self.episode_batch.append(data)
+        self.exploitation_batch.append(data)
+
+        # EXPLORATION calculation
+        # TODO: duplicate episodes
+        # set the return of the episode to 0
+
+        if self.use_exploration_sampling:
+            rews_zero = np.zeros_like(rews)
+
+            # the next two lines implement GAE-Lambda advantage calculation
+            deltas = rews_zero[:-1] + self.gamma * vals[1:] - vals[:-1]
+            adv_buf = discount_cumsum(deltas, self.gamma * self.lam)
+
+            # the next line computes rewards-to-go, to be targets for the value
+            # function
+            ret_buf = discount_cumsum(rews_zero, self.gamma)[:-1]
+
+            # adv buff normalization
+            adv_buf = (adv_buf - adv_buf.mean()) / (adv_buf.std() + 1e-8)
+
+            data = dict(obs=self.obs_buf[path_slice],
+                        act=self.act_buf[path_slice],
+                        adv=np.array(adv_buf, copy=True),
+                        ret=np.array(ret_buf, copy=True),
+                        logp=self.logp_buf[path_slice],
+                        val=self.val_buf[path_slice],
+                        prev_act=self.prev_act_buf[path_slice],
+                        prev_rew=self.prev_rew_buf[path_slice],
+                        hidden=self.hxs_buf[self.path_start_idx])
+
+            data = {k: torch.as_tensor(v, dtype=torch.float32).to(self.device)
+                    for k, v in data.items()}
+            self.exploration_batch.append(data)
 
         self.path_start_idx = self.ptr
 
@@ -122,10 +159,22 @@ class RolloutBuffer:
         mean zero and std one). Also, resets some pointers in the buffer.
         """
         # buffer has to be full before you can get
-        assert self.ptr == self.max_size
+        # assert self.ptr == self.max_size
 
-        np.random.shuffle(self.episode_batch)
-        return self.episode_batch
+        if self.use_exploration_sampling:
+            k = len(self.exploitation_batch)
+            # 30% of the batch for exploration
+            p = k//3
+
+            # p explore-rollouts
+            explore = np.random.choice(self.exploration_batch, p)
+            # k-p exploit-rollouts
+            exploit = np.random.choice(self.exploitation_batch, k-p)
+
+            return [*explore, *exploit]
+
+        np.random.shuffle(self.exploitation_batch)
+        return self.exploitation_batch
 
     def reset(self):
         self.obs_buf = np.zeros_like(self.obs_buf)
@@ -138,7 +187,8 @@ class RolloutBuffer:
         self.prev_act_buf = np.zeros_like(self.prev_act_buf)
         self.prev_rew_buf = np.zeros_like(self.prev_rew_buf)
 
-        self.episode_batch = []
+        self.exploration_batch = []
+        self.exploitation_batch = []
         self.ptr, self.path_start_idx, self.max_size = 0, 0, self.size
 
 
@@ -147,24 +197,39 @@ class PPO(RL_agent):
             self, config, env, logger_kwargs=dict(), seed=42, save_freq=1,
             gamma=0.99, lr=3e-4, clip_ratio=0.2, ppo_iter=4,
             lam=0.97, target_kl=0.01, value_coef=0.25, entropy_coef=0.01,
-            epochs=100, steps_per_epoch=4000, hidden_size=256):
+            epochs=100, steps_per_epoch=4000, hidden_size=256,
+            count_trajectories=False, number_of_trajectories=10,
+            exploration_sampling=False):
         super().__init__(config, env, logger_kwargs,
                          seed, gamma, lr, save_freq)
 
-        self.ppo_iters = ppo_iter
-        self.steps_per_epoch = steps_per_epoch
-        self.epochs = epochs
-
         # Currently too init low for my purpose?
-        self.target_kl = target_kl
         self.lmbda = lam
         self.gamma = gamma
         self.clip_ratio = clip_ratio
         self.value_coef = value_coef
         self.entropy_coef = entropy_coef
+        self.ppo_iters = ppo_iter
+        self.target_kl = target_kl
         self.hidden_size = hidden_size
 
+        # Meta-learning parameters
+        self.count_trajectories = count_trajectories
+        if count_trajectories:
+            self.number_of_trajectories = number_of_trajectories
+            self.current_test_epoch = 0
+            self.current_epoch = 0
+        else:
+            self.steps_per_epoch = steps_per_epoch
+
+        # epochs = 1, if every task gets a single trial
+        self.epochs = epochs
+
+        # Meta-testing environment
+        self.test_env = None
+
         self.global_steps = 0
+        self.global_test_steps = 0
 
         self.ac = ActorCritic(env, hidden_size, self.device).to(self.device)
         self.optimizer = Adam(self.ac.parameters(), lr=lr, eps=1e-5)
@@ -172,11 +237,11 @@ class PPO(RL_agent):
         obs_dim = env.observation_space.shape
         act_dim = env.action_space.shape
 
-        self.storage = RolloutBuffer(obs_dim, act_dim,
-                                     self.steps_per_epoch,
-                                     hidden_size,
-                                     self.device,
-                                     gamma=gamma, lam=lam)
+        self.storage = RolloutBuffer(
+            obs_dim, act_dim, self.steps_per_epoch,
+            hidden_size, self.device,
+            use_exploration_sampling=exploration_sampling,
+            gamma=gamma, lam=lam)
 
     def get_action(self, obs, prev_act, prev_rew, hid):
 
@@ -274,16 +339,97 @@ class PPO(RL_agent):
             DeltaLossPi=(pi_info['loss_pi'] - pi_info_old['loss_pi']),
             DeltaLossV=(pi_info['loss_v'] - pi_info_old['loss_v']))
 
-    def train_agent(self):
+    def train_agent(self, env):
+        if self.count_trajectories:
+            # Use k trajectories per trial
+            self.train_ep_agent(env)
+        else:
+            # Use k steps per trial
+            self.train_step_agent(env)
+
+    def train_ep_agent(self, env):
+        assert env is not None, "Pass a task for the current trial"
+
         # Prepare for interaction with environment
+        self.env = env
         start_time = time.time()
-        o, ep_ret, ep_len = self.env.reset(), 0, 0
+
+        # RL^2 variables
+        a2 = 0
+        r2 = 0
+
+        for epoch in range(self.epochs):
+            # Inbetween trials reset the hidden weights
+            h_in = torch.zeros([1, 1, self.hidden_size]).to(self.device)
+            h_out = torch.zeros([1, 1, self.hidden_size]).to(self.device)
+
+            # To sample k trajectories
+            for _ in range(self.number_of_trajectories):
+                d, ep_ret, ep_len, ep_max_acc = False, 0, 0, 0
+                o = self.env.reset()
+
+                while not(d or (ep_len == self.max_ep_len)):
+                    # Keeping track of current hidden states
+                    h_in = h_out
+
+                    a, v, logp_a, h_out = self.get_action(o, a2, r2, h_in)
+                    next_o, r, d, info = self.env.step(a)
+                    ep_ret += r
+                    ep_len += 1
+
+                    # DARTS information
+                    if 'acc' in info:
+                        acc = info['acc']
+                        if acc is not None and acc > ep_max_acc:
+                            ep_max_acc = acc
+
+                    # save and log
+                    self.storage.store(o, a, r, logp_a, v, a2,
+                                       r2, h_in.cpu().numpy())
+                    self.logger.store(VVals=v)
+
+                    # Set the previous reward and action
+                    r2 = r
+                    a2 = a
+
+                    # Update obs (critical!)
+                    o = next_o
+
+                    timeout = ep_len == self.max_ep_len
+
+                    # Keep track of total environment interactions
+                    self.global_steps += 1
+
+                # End of trajectory handling
+                if timeout:
+                    _, v, _, _ = self.get_action(o, a2, r2, h_out)
+                else:
+                    v = 0
+                self.storage.finish_path(v)
+
+                self.logger.store(EpRet=ep_ret, EpLen=ep_len,
+                                  MaxAcc=ep_max_acc)
+
+                # Perform PPO update!
+                self.update()
+                self.storage.reset()
+
+            self.current_epoch += 1
+            self._log_trial(epoch, start_time)
+
+    def train_step_agent(self, env):
+        assert env is not None, "Pass a task for the current trial"
+
+        # Prepare for interaction with environment
+        self.env = env
+        start_time = time.time()
+        o, ep_ret, ep_len, ep_max_acc = self.env.reset(), 0, 0, 0
 
         # RL^2 variables
         h_in = torch.zeros([1, 1, self.hidden_size]).to(self.device)
         h_out = torch.zeros([1, 1, self.hidden_size]).to(self.device)
 
-        a2 = np.array([[self.env.action_space.sample()]])
+        a2 = np.array([[0]])
         r2 = 0
 
         for epoch in range(self.epochs):
@@ -291,9 +437,9 @@ class PPO(RL_agent):
                 # Keeping track of current hidden states
                 h_in = h_out
 
-                a, v, logp_a, _ = self.get_action(o, a2, r2, h_in)
+                a, v, logp_a, h_out = self.get_action(o, a2, r2, h_in)
 
-                next_o, r, d, _ = self.env.step(a)
+                next_o, r, d, info_dict = self.env.step(a)
                 ep_ret += r
                 ep_len += 1
 
@@ -308,6 +454,12 @@ class PPO(RL_agent):
 
                 # Update obs (critical!)
                 o = next_o
+
+                # DARTS information
+                if 'acc' in info_dict:
+                    acc = info_dict['acc']
+                    if acc is not None and acc > ep_max_acc:
+                        ep_max_acc = acc
 
                 timeout = ep_len == self.max_ep_len
                 terminal = d or timeout
@@ -330,19 +482,57 @@ class PPO(RL_agent):
 
                     if terminal:
                         # only save EpRet / EpLen if trajectory finished
-                        self.logger.store(EpRet=ep_ret, EpLen=ep_len)
+                        self.logger.store(EpRet=ep_ret, EpLen=ep_len,
+                                          EpMaxAcc=ep_max_acc)
                     o, ep_ret, ep_len = self.env.reset(), 0, 0
+                    ep_max_acc = 0
 
                 # Increase global steps for the next trial
                 self.global_steps += 1
 
+            # TODO: Perform updates every n steps?
             # Perform PPO update!
             self.update()
             self.storage.reset()
 
-            self.log_episode(epoch, start_time)
+            self._log_trial(epoch, start_time)
 
-    def log_episode(self, epoch, start_time):
+    def test_agent(self, test_env, num_test_episodes=10):
+        self.test_env = test_env
+
+        h = torch.zeros([1, 1, self.hidden_size]).to(self.device)
+        start_time = time.time()
+        a2, r2 = 0, 0
+
+        for _ in range(num_test_episodes):
+            o, d, ep_ret, ep_len = self.test_env.reset(), False, 0, 0
+            ep_max_acc = 0
+
+            while not(d or (ep_len == self.max_ep_len)):
+                a, _, _, h = self.get_action(o, a2, r2, h)
+
+                o2, r, d, info_dict = self.test_env.step(a)
+
+                o = o2
+                r2 = r
+                a2 = a
+
+                ep_ret += r
+                ep_len += 1
+
+                # DARTS information
+                if 'acc' in info_dict:
+                    acc = info_dict['acc']
+                    if acc is not None and acc > ep_max_acc:
+                        ep_max_acc = acc
+
+                self.global_test_steps += 1
+
+            self.logger.store(TestEpRet=ep_ret, TestEpLen=ep_len,
+                              TestEpMaxAcc=ep_max_acc)
+        self._log_test_trial(self.global_test_steps, start_time)
+
+    def _log_trial(self, epoch, start_time):
         # Log to tensorboard
         log_board = {
             'Performance': [
@@ -369,6 +559,8 @@ class PPO(RL_agent):
         self.logger.log_tabular('Epoch', epoch)
         self.logger.log_tabular('EpRet', with_min_and_max=True)
         self.logger.log_tabular('EpLen', average_only=True)
+        # Ignore this metric for non-NAS environments
+        self.logger.log_tabular('EpMaxAcc', with_min_and_max=True)
         self.logger.log_tabular('VVals', with_min_and_max=True)
         self.logger.log_tabular('TotalEnvInteracts',
                                 (epoch+1)*self.steps_per_epoch)
@@ -381,5 +573,37 @@ class PPO(RL_agent):
         self.logger.log_tabular('Entropy', average_only=True)
         self.logger.log_tabular('KL', average_only=True)
         self.logger.log_tabular('ClipFrac', average_only=True)
+        self.logger.log_tabular('Time', time.time()-start_time)
+        self.logger.dump_tabular()
+
+    def _log_test_trial(self, t, start_time):
+        trial = (t+1) // self.steps_per_epoch
+
+        # Save model
+        if (trial % self.save_freq == 0) or (trial == self.epochs):
+            self.logger.save_state({'env': self.env}, None)
+
+        # Log info about the current trial
+        log_board = {
+            'Performance': ['TestEpRet', 'TestEpLen', 'TestEpMaxAcc']}
+
+        # Update tensorboard
+        for key, value in log_board.items():
+            for val in value:
+                mean, std = self.logger.get_stats(val)
+
+                if key == 'Performance':
+                    self.summary_writer.add_scalar(
+                        key+'/Average'+val, mean, t)
+                    self.summary_writer.add_scalar(
+                        key+'/Std'+val, std, t)
+                else:
+                    self.summary_writer.add_scalar(
+                        key+'/'+val, mean, t)
+
+        self.logger.log_tabular('TestEpRet', with_min_and_max=True)
+        self.logger.log_tabular('TestEpLen', average_only=True)
+        # Ignore this metric for non-NAS environments
+        self.logger.log_tabular('TestEpMaxAcc', with_min_and_max=True)
         self.logger.log_tabular('Time', time.time()-start_time)
         self.logger.dump_tabular()

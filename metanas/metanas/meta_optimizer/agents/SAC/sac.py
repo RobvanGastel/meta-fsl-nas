@@ -10,7 +10,7 @@ from torch.optim import Adam
 from metanas.meta_optimizer.agents.core import (count_vars,
                                                 combined_shape)
 from metanas.meta_optimizer.agents.SAC.core import MLPActorCritic
-from metanas.metanas.meta_optimizer.agents.agent import RL_agent
+from metanas.meta_optimizer.agents.agent import RL_agent
 
 
 class ReplayBuffer:
@@ -78,6 +78,10 @@ class SAC(RL_agent):
                                  env.action_space, **ac_kwargs).to(self.device)
         self.ac_targ = copy.deepcopy(self.ac)
 
+        # List of parameters for both Q-networks (save this for convenience)
+        self.q_params = itertools.chain(self.ac.q1.parameters(),
+                                        self.ac.q2.parameters())
+
         # Set up optimizers for policy and q-function
         self.pi_optimizer = Adam(self.ac.pi.parameters(), lr=self.lr)
         self.q_optimizer = Adam(self.q_params, lr=self.lr)
@@ -89,10 +93,6 @@ class SAC(RL_agent):
         # (only update via polyak averaging)
         for p in self.ac_targ.parameters():
             p.requires_grad = False
-
-        # List of parameters for both Q-networks (save this for convenience)
-        self.q_params = itertools.chain(self.ac.q1.parameters(),
-                                        self.ac.q2.parameters())
 
         # Set replay buffer
         self.replay_buffer = ReplayBuffer(
@@ -247,7 +247,9 @@ class SAC(RL_agent):
                 ep_len += 1
             self.logger.store(TestEpRet=ep_ret, TestEpLen=ep_len)
 
-    def train_agent(self):
+    def train_agent(self, env):
+
+        self.env = env
         start_time = time.time()
         o, ep_ret, ep_len = self.env.reset(), 0, 0
 

@@ -132,8 +132,6 @@ class ActorCritic(nn.Module):
         self.act_dim = act_dim
 
         self.linear1 = layer_init(nn.Linear(obs_dim, self.hidden_size))
-        self.linear2 = layer_init(
-            nn.Linear(self.hidden_size, self.hidden_size))
 
         # +1 for the reward
         self.gru = nn.GRU(self.hidden_size+act_dim+1,
@@ -152,9 +150,7 @@ class ActorCritic(nn.Module):
 
         # previous action one-hot encoding: (batch_size, act_dim)
         prev_act = self._one_hot(prev_act)
-
         obs_enc = self.activation(self.linear1(obs))
-        obs_enc = self.activation(self.linear2(obs_enc))
 
         gru_input = torch.cat(
             [
@@ -196,13 +192,11 @@ class ActorCritic(nn.Module):
             the input. Defaults to 1.
 
         Returns:
-            [torch.tensor]: Value-function estimates 
+            [torch.tensor]: Value-function estimates
         """
 
         prev_act = self._one_hot(prev_act)
-
         obs_enc = self.activation(self.linear1(obs))
-        obs_enc = self.activation(self.linear2(obs_enc))
 
         gru_input = torch.cat(
             [

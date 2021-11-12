@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Categorical
 
+from metanas.meta_optimizer.agents.core import mlp
+
 
 class CategoricalPolicy(nn.Module):
     def __init__(self, act_dim, hidden_size=64,
@@ -37,13 +39,13 @@ class CategoricalPolicy(nn.Module):
 
 
 class QNetwork(nn.Module):
-    def __init__(self, act_dim, hidden_size=64,
+    def __init__(self, obs_dim, act_dim, hidden_size=64,
                  activation=nn.ReLU()):
         super().__init__()
 
         self.activation = activation
 
-        self.linear1 = nn.Linear(hidden_size, hidden_size)
+        self.linear1 = nn.Linear(obs_dim, hidden_size)
         self.q = nn.Linear(hidden_size, act_dim)
 
     def forward(self, memory_emb):
@@ -61,7 +63,7 @@ class Memory(nn.Module):
         self.act_dim = act_dim
         self.device = device
 
-        self.obs_encoding = nn.Linear(obs_dim, hidden_size)
+        self.linear1 = nn.Linear(obs_dim, hidden_size)
         # +1 for the reward
         self.gru = nn.GRU(hidden_size+act_dim+1,
                           hidden_size,
@@ -73,13 +75,13 @@ class Memory(nn.Module):
     def forward(self, obs, prev_act, prev_rew, hid_in,
                 training=False):
 
-        act_encoding = self._one_hot(prev_act)
-        obs_encoding = self.activation(self.obs_encoding(obs))
+        act_enc = self._one_hot(prev_act)
+        obs_enc = self.activation(self.linear1(obs))
 
         gru_input = torch.cat(
             [
-                obs_encoding,
-                act_encoding,
+                obs_enc,
+                act_enc,
                 prev_rew
             ],
             dim=-1,
@@ -112,10 +114,12 @@ class ActorCritic(nn.Module):
         self.pi = CategoricalPolicy(
             act_dim, hidden_size=hidden_size[0], activation=activation)
 
-        self.q1 = QNetwork(
-            act_dim, hidden_size=hidden_size[0], activation=activation)
-        self.q2 = QNetwork(
-            act_dim, hidden_size=hidden_size[0], activation=activation)
+        self.q1 = QNetwork(obs_dim, act_dim,
+                           hidden_size=hidden_size[0],
+                           activation=activation)
+        self.q2 = QNetwork(obs_dim, act_dim,
+                           hidden_size=hidden_size[0],
+                           activation=activation)
 
     def act(self, obs, prev_act, prev_rew, hid_in,
             training=False):
@@ -134,3 +138,71 @@ class ActorCritic(nn.Module):
             action, _, _ = self.pi.sample(mem_emb)
 
         return action.item(), hid_out
+
+
+class MLPCategoricalPolicy(nn.Module):
+    def __init__(self, obs_dim, act_dim, hidden_size, activation):
+        super().__init__()
+        pi_sizes = [obs_dim] + hidden_size + [act_dim]
+        self.pi = mlp(pi_sizes, activation, nn.Tanh).cuda()
+
+    def act(self, obs):
+        action_logits = self.pi(obs)
+        greedy_actions = torch.argmax(action_logits, dim=-1)
+        return greedy_actions
+
+    def sample(self, obs):
+        policy = self.pi(obs)
+        action_probs = F.softmax(policy, dim=-1)
+
+        action_dist = Categorical(action_probs)
+        actions = action_dist.sample().view(-1, 1)
+
+        # Avoid numerical instability
+        z = (action_probs == 0.0).float() * 1e-8
+        log_action_probs = torch.log(action_probs + z)
+
+        return actions, action_probs, log_action_probs
+
+
+class MLPQNetwork(nn.Module):
+
+    def __init__(self, obs_dim, act_dim, hidden_size, activation):
+        super().__init__()
+        self.a = mlp([obs_dim] + hidden_size + [act_dim], activation)
+        self.v = mlp([obs_dim] + hidden_size + [1], activation)
+
+    def forward(self, obs):
+
+        a = self.a(obs)
+        v = self.v(obs)
+
+        return v + a - a.mean(1, keepdim=True)
+
+
+class MLPActorCritic(nn.Module):
+    def __init__(self, observation_space, action_space,
+                 hidden_size=[256, 256],
+                 activation=nn.ReLU):
+        super().__init__()
+
+        obs_dim = observation_space.shape[0]
+        act_dim = action_space.n
+
+        self.pi = MLPCategoricalPolicy(
+            obs_dim, act_dim, hidden_size, activation)
+        self.q1 = MLPQNetwork(obs_dim, act_dim, hidden_size, activation)
+        self.q2 = MLPQNetwork(obs_dim, act_dim, hidden_size, activation)
+
+    def explore(self, obs):
+        with torch.no_grad():
+            action, _, _ = self.pi.sample(
+                torch.as_tensor(obs, dtype=torch.float32).cuda())
+        return action.item()
+
+    def act(self, obs):
+        # Greedy action selection by the policy
+        with torch.no_grad():
+            action = self.pi.act(
+                torch.as_tensor(obs, dtype=torch.float32).cuda())
+        return action.item()

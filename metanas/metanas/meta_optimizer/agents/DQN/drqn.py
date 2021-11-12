@@ -268,7 +268,8 @@ class DRQN(RL_agent):
                 ep_len += 1
             self.logger.store(TestEpRet=ep_ret, TestEpLen=ep_len)
 
-    def train_agent(self):
+    def train_agent(self, env):
+        self.env = env
         episode_record = EpisodeMemory(self.random_update)
         h, c = self.init_hidden_states(batch_size=1)
 

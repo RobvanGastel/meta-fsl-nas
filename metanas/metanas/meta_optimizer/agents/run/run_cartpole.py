@@ -82,6 +82,6 @@ if __name__ == "__main__":
                         epochs=args.epochs,
                         logger_kwargs=logger_kwargs)
     else:
-        raise ValueError(f"The given agent ${args.agent} is not supported")
+        raise ValueError(f"The given agent {args.agent} is not supported")
 
     agent.train_agent(env)
