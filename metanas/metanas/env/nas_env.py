@@ -9,10 +9,8 @@ import gym
 from gym import spaces
 
 import torch
-import torch.nn.functional as F
 import torch.nn as nn
-
-from torchvision import transforms
+import torch.nn.functional as F
 import torchvision.models as models
 
 from metanas.meta_predictor.meta_predictor import MetaPredictor
@@ -55,8 +53,9 @@ class NasEnv(gym.Env):
         # The task is set in the meta-loop
         self.current_task = None
         self.max_ep_len = max_ep_len  # max_steps
-        self.reward_range = (-0.1, 4)
 
+        # TODO: Properly pass range
+        self.reward_range = (-0.1, 4)
         # Pick reward range,
         # self.reward_range = (-1, 1)
 

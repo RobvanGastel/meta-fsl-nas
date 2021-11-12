@@ -24,7 +24,8 @@ class CartPolePOMDPWrapper(gym.ObservationWrapper):
 
     def __init__(self, env):
         super().__init__(env)
-        assert env.env.spec.id == "CartPole-v1" or env.env.spec.id == "CartPole-v2", \
+        assert env.env.spec.id == "CartPole-v1" or \
+            env.env.spec.id == "CartPole-v2", \
             "Should only be used to wrap CartPole environments."
 
         self.theta_threshold_radians = 12 * 2 * math.pi / 360
