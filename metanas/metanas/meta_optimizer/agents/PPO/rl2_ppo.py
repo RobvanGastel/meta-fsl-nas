@@ -198,7 +198,7 @@ class PPO(RL_agent):
             gamma=0.99, lr=3e-4, clip_ratio=0.2, ppo_iter=4,
             lam=0.97, target_kl=0.01, value_coef=0.25, entropy_coef=0.01,
             epochs=100, steps_per_epoch=4000, hidden_size=256,
-            count_trajectories=False, number_of_trajectories=10,
+            count_trajectories=True, number_of_trajectories=100,
             exploration_sampling=False):
         super().__init__(config, env, logger_kwargs,
                          seed, gamma, lr, save_freq)
@@ -217,10 +217,11 @@ class PPO(RL_agent):
         self.count_trajectories = count_trajectories
         if count_trajectories:
             self.number_of_trajectories = number_of_trajectories
+            self.total_traj = 0
             self.current_test_epoch = 0
             self.current_epoch = 0
-        else:
-            self.steps_per_epoch = steps_per_epoch
+
+        self.steps_per_epoch = self.number_of_trajectories * 110  # steps_per_epoch
 
         # epochs = 1, if every task gets a single trial
         self.epochs = epochs
@@ -233,6 +234,9 @@ class PPO(RL_agent):
 
         self.ac = ActorCritic(env, hidden_size, self.device).to(self.device)
         self.optimizer = Adam(self.ac.parameters(), lr=lr, eps=1e-5)
+
+        # Set up model saving
+        self.logger.setup_pytorch_saver(self.ac)
 
         obs_dim = env.observation_space.shape
         act_dim = env.action_space.shape
@@ -309,28 +313,22 @@ class PPO(RL_agent):
             pi_info_old.append(info_old)
         pi_info_old = aggregate_info_dicts(pi_info_old)
 
-        pi_info = []
+        pi_info_lst = []
         for _ in range(self.ppo_iters):
             batch = self.storage.get()
             for episode in batch:
                 loss, loss_info = self.compute_loss(episode)
-                pi_info.append(loss_info)
+                pi_info_lst.append(loss_info)
 
                 self.optimizer.zero_grad()
                 loss.backward()
                 nn.utils.clip_grad_norm_(self.ac.parameters(), max_norm=0.5)
                 self.optimizer.step()
 
-            # TODO: Currently, prematurely stops the learning
-            # if pi_info['kl'] > 1.5 * self.target_kl:
-            #     self.logger.log(
-            #         'Early stopping at step %d due to reaching max kl.' % i)
-            #     break
-
-        pi_info = aggregate_dicts(pi_info)
+        pi_info = aggregate_dicts(pi_info_lst)
 
         # Log changes from update
-        kl, ent, cf = pi_info['kl'], pi_info_old['ent'], pi_info['cf']
+        kl, ent, cf = pi_info['kl'], pi_info['ent'], pi_info['cf']
         self.logger.store(
             LossPi=pi_info['loss_pi'],
             LossV=pi_info['loss_v'], Loss=pi_info['loss'],
@@ -355,7 +353,7 @@ class PPO(RL_agent):
         start_time = time.time()
 
         # RL^2 variables
-        a2 = 0
+        a2 = np.array([[0]])
         r2 = 0
 
         for epoch in range(self.epochs):
@@ -364,7 +362,7 @@ class PPO(RL_agent):
             h_out = torch.zeros([1, 1, self.hidden_size]).to(self.device)
 
             # To sample k trajectories
-            for _ in range(self.number_of_trajectories):
+            for tr in range(self.number_of_trajectories):
                 d, ep_ret, ep_len, ep_max_acc = False, 0, 0, 0
                 o = self.env.reset()
 
@@ -383,7 +381,7 @@ class PPO(RL_agent):
                         if acc is not None and acc > ep_max_acc:
                             ep_max_acc = acc
 
-                    # save and log
+                            # save and log
                     self.storage.store(o, a, r, logp_a, v, a2,
                                        r2, h_in.cpu().numpy())
                     self.logger.store(VVals=v)
@@ -408,14 +406,18 @@ class PPO(RL_agent):
                 self.storage.finish_path(v)
 
                 self.logger.store(EpRet=ep_ret, EpLen=ep_len,
-                                  MaxAcc=ep_max_acc)
+                                  EpMaxAcc=ep_max_acc)
 
+                if tr >= 25 and \
+                        tr % 25 == 0:
+                    self.update()
+                    self.storage.reset()
                 # Perform PPO update!
-                self.update()
-                self.storage.reset()
+                # self.update()
+                # self.storage.reset()
 
             self.current_epoch += 1
-            self._log_trial(epoch, start_time)
+            self._log_trial(self.current_epoch, start_time)
 
     def train_step_agent(self, env):
         assert env is not None, "Pass a task for the current trial"
@@ -465,6 +467,11 @@ class PPO(RL_agent):
                 terminal = d or timeout
                 epoch_ended = t == self.steps_per_epoch-1
 
+                if t >= 1000 and \
+                        self.global_steps % 1000 == 0:
+                    self.update()
+                    self.storage.reset()
+
                 # End of trajectory handling
                 if terminal or epoch_ended:
                     if epoch_ended and not(terminal):
@@ -492,8 +499,8 @@ class PPO(RL_agent):
 
             # TODO: Perform updates every n steps?
             # Perform PPO update!
-            self.update()
-            self.storage.reset()
+            # self.update()
+            # self.storage.reset()
 
             self._log_trial(epoch, start_time)
 
@@ -528,8 +535,8 @@ class PPO(RL_agent):
 
                 self.global_test_steps += 1
 
-            self.logger.store(TestEpRet=ep_ret, TestEpLen=ep_len,
-                              TestEpMaxAcc=ep_max_acc)
+            # self.logger.store(TestEpRet=ep_ret, TestEpLen=ep_len,
+            #                   TestEpMaxAcc=ep_max_acc)
         self._log_test_trial(self.global_test_steps, start_time)
 
     def _log_trial(self, epoch, start_time):
@@ -563,7 +570,7 @@ class PPO(RL_agent):
         self.logger.log_tabular('EpMaxAcc', with_min_and_max=True)
         self.logger.log_tabular('VVals', with_min_and_max=True)
         self.logger.log_tabular('TotalEnvInteracts',
-                                (epoch+1)*self.steps_per_epoch)
+                                self.global_steps)
         self.logger.log_tabular('LossPi', average_only=True)
         self.logger.log_tabular('LossV', average_only=True)
         self.logger.log_tabular('Loss', average_only=True)
@@ -577,33 +584,34 @@ class PPO(RL_agent):
         self.logger.dump_tabular()
 
     def _log_test_trial(self, t, start_time):
-        trial = (t+1) // self.steps_per_epoch
+        pass
+        # trial = (t+1) // self.steps_per_epoch
 
-        # Save model
-        if (trial % self.save_freq == 0) or (trial == self.epochs):
-            self.logger.save_state({'env': self.env}, None)
+        # # Save model
+        # if (trial % self.save_freq == 0) or (trial == self.epochs):
+        #     self.logger.save_state({'env': self.env}, None)
 
-        # Log info about the current trial
-        log_board = {
-            'Performance': ['TestEpRet', 'TestEpLen', 'TestEpMaxAcc']}
+        # # Log info about the current trial
+        # log_board = {
+        #     'Performance': ['TestEpRet', 'TestEpLen', 'TestEpMaxAcc']}
 
-        # Update tensorboard
-        for key, value in log_board.items():
-            for val in value:
-                mean, std = self.logger.get_stats(val)
+        # # Update tensorboard
+        # for key, value in log_board.items():
+        #     for val in value:
+        #         mean, std = self.logger.get_stats(val)
 
-                if key == 'Performance':
-                    self.summary_writer.add_scalar(
-                        key+'/Average'+val, mean, t)
-                    self.summary_writer.add_scalar(
-                        key+'/Std'+val, std, t)
-                else:
-                    self.summary_writer.add_scalar(
-                        key+'/'+val, mean, t)
+        #         if key == 'Performance':
+        #             self.summary_writer.add_scalar(
+        #                 key+'/Average'+val, mean, t)
+        #             self.summary_writer.add_scalar(
+        #                 key+'/Std'+val, std, t)
+        #         else:
+        #             self.summary_writer.add_scalar(
+        #                 key+'/'+val, mean, t)
 
-        self.logger.log_tabular('TestEpRet', with_min_and_max=True)
-        self.logger.log_tabular('TestEpLen', average_only=True)
-        # Ignore this metric for non-NAS environments
-        self.logger.log_tabular('TestEpMaxAcc', with_min_and_max=True)
-        self.logger.log_tabular('Time', time.time()-start_time)
-        self.logger.dump_tabular()
+        # self.logger.log_tabular('TestEpRet', with_min_and_max=True)
+        # self.logger.log_tabular('TestEpLen', average_only=True)
+        # # Ignore this metric for non-NAS environments
+        # self.logger.log_tabular('TestEpMaxAcc', with_min_and_max=True)
+        # self.logger.log_tabular('Time', time.time()-start_time)
+        # self.logger.dump_tabular()

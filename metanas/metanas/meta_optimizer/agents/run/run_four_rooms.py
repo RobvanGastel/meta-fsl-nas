@@ -2,7 +2,7 @@ import argparse
 
 import numpy as np
 
-from metanas.env.krazy_world_env import KrazyWorld
+from metanas.env.four_room_env import FourRoomsEnv
 from metanas.meta_optimizer.agents.PPO.rl2_ppo import PPO
 from metanas.meta_optimizer.agents.SAC.rl2_sac import SAC
 from metanas.meta_optimizer.agents.DQN.rl2_dqn import DQN
@@ -27,14 +27,12 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # Distribution, same number of testing and training envs as used
-    # in E-MAML
-    envs = [KrazyWorld(seed=s, task_seed=s**2+1) for s in range(32)]
-    test_envs = [KrazyWorld(seed=s, task_seed=s**2+1)
-                 for s in range(100, 164)]
+    # Very simple meta-learning tasks
+    envs = [FourRoomsEnv(seed=s) for s in range(32)]
+    test_envs = [FourRoomsEnv(seed=s) for s in range(100, 164)]
 
     # Setup logging
-    path = f"KrazyWorld/RL2_{args.agent}_{args.name}"
+    path = f"FourRooms/RL2_{args.agent}_{args.name}"
     logger_kwargs = setup_logger_kwargs(path, seed=args.seed)
 
     env = np.random.choice(envs, 1)[0]

@@ -20,8 +20,9 @@ class SAC(RL_agent):
                  steps_per_epoch=4000, epochs=1, batch_size=16,
                  replay_size=int(1e6), time_step=50, use_time_steps=False,
                  hidden_size=256, start_steps=10000, update_after=1000,
-                 update_every=50, use_exploration_sampling=False,
-                 reset_buffer=False, clip_ratio=1.0):
+                 update_every=50, exploration_sampling=False,
+                 reset_buffer=False, clip_ratio=1.0,
+                 use_alpha_annealing=False):
         super().__init__(config, env, logger_kwargs,
                          seed, gamma, lr, save_freq)
 
@@ -76,13 +77,18 @@ class SAC(RL_agent):
         # on the whole trajectories for meta-learning purposes
         self.buffer = EpisodicBuffer(
             obs_dim, act_dim, replay_size, self.hidden_size, self.device,
-            use_sac=True, use_exploration_sampling=use_exploration_sampling)
+            use_sac=True, use_exploration_sampling=exploration_sampling)
 
         # Optimize entropy exploration-exploitation parameter
-        self.entropy_target = 0.98 * (-np.log(1 / self.env.action_space.n))
-        self.log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
-        self.alpha = self.log_alpha.exp()
-        self.alpha_optimizer = Adam([self.log_alpha], lr=self.lr)
+        self.use_alpha_annealing = use_alpha_annealing
+        if use_alpha_annealing:
+            self.entropy_target = 0.98 * (-np.log(1 / self.env.action_space.n))
+            self.log_alpha = torch.zeros(
+                1, requires_grad=True, device=self.device)
+            self.alpha = self.log_alpha.exp()
+            self.alpha_optimizer = Adam([self.log_alpha], lr=self.lr)
+        else:
+            self.alpha = 0.2
 
         # List of parameters for both Q-networks (save this for convenience)
         self.q_params = itertools.chain(self.ac.q1.parameters(),
@@ -221,13 +227,17 @@ class SAC(RL_agent):
 
             # Optimize the alpha
             # Entropy values
-            alpha_loss = -(self.log_alpha * (logp_pi.detach() +
-                                             self.entropy_target)).mean()
+            if self.use_alpha_annealing:
+                alpha_loss = -(self.log_alpha * (logp_pi.detach() +
+                                                 self.entropy_target)).mean()
 
-            self.alpha_optimizer.zero_grad()
-            alpha_loss.backward()
-            self.alpha_optimizer.step()
-            self.alpha = self.log_alpha.exp()
+                self.alpha_optimizer.zero_grad()
+                alpha_loss.backward()
+                self.alpha_optimizer.step()
+                self.alpha = self.log_alpha.exp()
+            else:
+                alpha_loss = torch.tensor(0)
+                self.alpha = torch.tensor(0.2)
 
         # Recording alpha and alpha loss
         self.logger.store(LossAlpha=alpha_loss.cpu().detach().numpy(),
@@ -295,8 +305,8 @@ class SAC(RL_agent):
 
                 self.global_test_steps += 1
 
-            self.logger.store(TestEpRet=ep_ret, TestEpLen=ep_len,
-                              TestEpMaxAcc=ep_max_acc)
+            # self.logger.store(TestEpRet=ep_ret, TestEpLen=ep_len,
+            #                   TestEpMaxAcc=ep_max_acc)
         self._log_test_trial(self.global_test_steps, start_time)
 
     def train_agent(self, env=None):
@@ -365,7 +375,7 @@ class SAC(RL_agent):
                     o, ep_ret, ep_len, ep_max_acc = self.env.reset(), 0, 0, 0
 
                 # Update handling
-                if self.global_steps >= self.update_after and \
+                if t >= self.update_after and \
                         self.global_steps % self.update_every == 0:
                     for _ in range(self.update_multiplier):
                         self.update()
@@ -445,9 +455,9 @@ class SAC(RL_agent):
                     self.summary_writer.add_scalar(
                         key+'/'+val, mean, t)
 
-        self.logger.log_tabular('TestEpRet', with_min_and_max=True)
-        self.logger.log_tabular('TestEpLen', average_only=True)
-        # Ignore this metric for non-NAS environments
-        self.logger.log_tabular('TestEpMaxAcc', with_min_and_max=True)
-        self.logger.log_tabular('Time', time.time()-start_time)
-        self.logger.dump_tabular()
+        # self.logger.log_tabular('TestEpRet', with_min_and_max=True)
+        # self.logger.log_tabular('TestEpLen', average_only=True)
+        # # Ignore this metric for non-NAS environments
+        # self.logger.log_tabular('TestEpMaxAcc', with_min_and_max=True)
+        # self.logger.log_tabular('Time', time.time()-start_time)
+        # self.logger.dump_tabular()

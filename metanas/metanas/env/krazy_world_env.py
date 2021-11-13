@@ -8,7 +8,7 @@ from metanas.env.krazy_world import KrazyGridWorld
 class KrazyWorld:
     metadata = {'render.modes': ['human']}
 
-    def __init__(self, seed, task_seed=42, max_ep_len=100,
+    def __init__(self, seed, task_seed=None, max_ep_len=100,
                  use_local_obs=True):
 
         # The settings except the seeds are taken from the E-MAML
