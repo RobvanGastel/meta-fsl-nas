@@ -29,7 +29,7 @@ class NasEnv(gym.Env):
     def __init__(self, config, meta_model,
                  test_phase=False, cell_type="normal",
                  reward_estimation=False,
-                 max_ep_len=100, test_env=None):
+                 max_ep_len=50, test_env=None):
         super().__init__()
         self.config = config
         self.test_env = test_env
@@ -55,7 +55,7 @@ class NasEnv(gym.Env):
         self.max_ep_len = max_ep_len  # max_steps
 
         # TODO: Properly pass range
-        self.reward_range = (-0.1, 4)
+        self.reward_range = (-0.1, 1)
         # Pick reward range,
         # self.reward_range = (-1, 1)
 
@@ -130,14 +130,15 @@ class NasEnv(gym.Env):
         # Reset best alphas and accuracy for current trial
         self.max_acc = 0.0
 
-        self.max_alphas = []
+        self.max_alphas = nn.ParameterList()
         if self.cell_type == "normal":
             for _, row in enumerate(self.meta_model.alpha_normal):
-                self.max_alphas.append(row.to(self.config.device))
+                self.max_alphas.append(
+                    nn.Parameter(row.to(self.config.device)))
         elif self.cell_type == "reduce":
             for _, row in enumerate(self.meta_model.alpha_reduce):
-                self.max_alphas.append(row.to(self.config.device))
-
+                self.max_alphas.append(
+                    nn.Parameter(row.to(self.config.device)))
         else:
             raise RuntimeError(f"Cell type {self.cell_type} is not supported.")
 
@@ -357,12 +358,15 @@ class NasEnv(gym.Env):
             if self.max_acc < acc:
                 self.max_acc = acc
 
+                self.max_alphas = nn.ParameterList()
                 if self.cell_type == "normal":
                     for _, row in enumerate(self.meta_model.alpha_normal):
-                        self.max_alphas.append(row.to(self.config.device))
+                        self.max_alphas.append(
+                            nn.Parameter(row.to(self.config.device)))
                 elif self.cell_type == "reduce":
                     for _, row in enumerate(self.meta_model.alpha_reduce):
-                        self.max_alphas.append(row.to(self.config.device))
+                        self.max_alphas.append(
+                            nn.Parameter(row.to(self.config.device)))
                 else:
                     raise RuntimeError(
                         f"Cell type {self.cell_type} is not supported.")

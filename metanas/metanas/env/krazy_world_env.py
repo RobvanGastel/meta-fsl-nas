@@ -46,8 +46,8 @@ class KrazyWorld:
             reset_agent_start_pos=reset_agent_start_pos,
             reset_dynamics=reset_dynamics)
 
-    def step(self, action):
-        return self._env.step(action)
+    def step(self, action, render=False):
+        return self._env.step(action, render=render)
 
     def render(self):
         self._env.render()
