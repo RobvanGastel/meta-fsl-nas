@@ -22,6 +22,7 @@ class SAC(RL_agent):
                  hidden_size=256, start_steps=10000, update_after=1000,
                  update_every=50, exploration_sampling=False,
                  reset_buffer=False, clip_ratio=1.0,
+                 count_trajectories=True, number_of_trajectories=100,
                  use_alpha_annealing=False):
         super().__init__(config, env, logger_kwargs,
                          seed, gamma, lr, save_freq)
@@ -32,14 +33,22 @@ class SAC(RL_agent):
         self.epochs = epochs
         # Number of steps per trial
         self.steps_per_epoch = steps_per_epoch
-        # if epochs = 1, every task runs a single trial
         self.total_steps = steps_per_epoch * epochs
-        # Track the steps of all trials combined
-        self.global_steps = 0
+        self.count_trajectories = count_trajectories
+        if count_trajectories:
+            self.number_of_trajectories = number_of_trajectories
+            self.total_traj = 0
+            self.current_test_epoch = 0
+            self.current_epoch = 0
+            self.steps_per_epoch = self.number_of_trajectories * self.max_ep_len
+            replay_size = self.steps_per_epoch
 
         # Meta-testing
         # Increase global steps for the next trial
         self.global_test_steps = 0
+
+        # Track the steps of all trials combined
+        self.global_steps = 0
 
         # Updating the network parameters
         self.polyak = polyak
@@ -189,6 +198,7 @@ class SAC(RL_agent):
         return loss_pi, logp_pi, pi_info
 
     def update(self):
+        # self.batch_size = None
         batch = self.buffer.get(self.batch_size)
 
         for episode in batch:
@@ -309,9 +319,94 @@ class SAC(RL_agent):
             #                   TestEpMaxAcc=ep_max_acc)
         self._log_test_trial(self.global_test_steps, start_time)
 
-    def train_agent(self, env=None):
+    def train_agent(self, env):
         assert env is not None, "Pass a task for the current trial"
+        if self.count_trajectories:
+            # Use k trajectories per trial
+            self.train_ep_agent(env)
+        else:
+            # Use k steps per trial
+            self.train_step_agent(env)
 
+    def train_ep_agent(self, env):
+        # Prepare for interaction with environment
+        self.env = env
+        start_time = time.time()
+
+        # RL^2 variables
+        a2, r2 = 0, 0
+
+        for epoch in range(self.epochs):
+            # Inbetween trials reset the hidden weights
+            h_in = torch.zeros([1, 1, self.hidden_size]).to(self.device)
+            h_out = torch.zeros([1, 1, self.hidden_size]).to(self.device)
+
+            # To sample k trajectories
+            for tr in range(self.number_of_trajectories):
+                d, ep_ret, ep_len, ep_max_acc = False, 0, 0, 0
+                o = self.env.reset()
+
+                while not(d or (ep_len == self.max_ep_len)):
+                    # Keeping track of current hidden states
+                    h_in = h_out
+
+                    # Until start_steps have elapsed, randomly sample actions
+                    # from a uniform distribution for better exploration. Afterwards,
+                    # use the learned policy.
+                    if self.global_steps > self.start_steps:
+                        a, h_out = self.get_action(
+                            o, a2, r2, h_in, greedy=False)
+                    else:
+                        a = self.env.action_space.sample()
+
+                    o2, r, d, info_dict = self.env.step(a)
+                    ep_ret += r
+                    ep_len += 1
+
+                    # DARTS information
+                    if 'acc' in info_dict:
+                        acc = info_dict['acc']
+                        if acc is not None and acc > ep_max_acc:
+                            ep_max_acc = acc
+
+                    # Ignore the "done" signal if it comes from hitting the time
+                    # horizon (that is, when it's an artificial terminal signal
+                    # that isn't based on the agent's state)
+                    d = False if ep_len == self.max_ep_len else d
+
+                    self.buffer.store(o, o2, a, r, d, a2, r2, (h_in.cpu().numpy(),
+                                                               h_out.cpu().numpy()))
+
+                    # Super critical, easy to overlook step: make sure to update
+                    # most recent observation!
+                    o = o2
+                    # Set previous action and reward
+                    r2 = r
+                    a2 = a
+
+                    # End of trajectory handling
+                    if d or (ep_len == self.max_ep_len):
+                        self.buffer.finish_path()
+
+                        if d or (ep_len == self.max_ep_len):
+                            self.logger.store(EpRet=ep_ret, EpLen=ep_len,
+                                              EpMaxAcc=ep_max_acc)
+
+                    # Increase global steps for the next trial
+                    self.global_steps += 1
+
+                # Update handling
+                if tr >= 25 and tr % 25 == 0:
+                    for _ in range(5):
+                        self.update()
+
+            self.buffer.reset()
+            self.current_epoch += 1
+            self._log_trial(self.global_steps, start_time)
+
+    def train_step_agent(self, env):
+
+        # Prepare for interaction with environment
         self.env = env
         start_time = time.time()
         o, ep_ret, ep_len, ep_max_acc = self.env.reset(), 0, 0, 0

@@ -1,6 +1,16 @@
 import time
+import numpy as np
 
 from metanas.meta_optimizer.agents.agent import RL_agent
+
+
+# TODO: Sample action with numpy instead
+class RandomPolicy:
+    def __init__(self, action_space):
+        self._action_space = action_space
+
+    def act(self):
+        return np.random.randint(self._action_space.n)
 
 
 class RandomAgent(RL_agent):

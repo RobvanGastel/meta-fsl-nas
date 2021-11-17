@@ -162,7 +162,7 @@ def set_rl_hyperparameters(config):
     config.agent_steps_per_trial = 500
     config.num_test_episodes = 3
 
-    if config.agent == "sac":
+    if config.agent == "ppo":
         config.gamma = 0.99
         config.polyak = 0.995
         config.agent_lr = 3e-4

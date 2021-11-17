@@ -15,8 +15,8 @@ class EpisodicBuffer:
                  use_sac=False, use_exploration_sampling=False):
 
         # Pick sampling episodes or time-steps
-        self.exploration_batch = []
-        self.exploitation_batch = []
+        self.exploration_batch = np.array([])
+        self.exploitation_batch = np.array([])
 
         self.use_sac = use_sac
 
@@ -90,7 +90,7 @@ class EpisodicBuffer:
                     hid_out=self.next_hxs_buf[self.path_start_idx])
         data = {k: torch.as_tensor(v, dtype=torch.float32).to(self.device)
                 for k, v in data.items()}
-        self.exploitation_batch.append(data)
+        self.exploitation_batch = np.append(self.exploitation_batch, data)
 
         if self.use_exploration_sampling:
             # Exploration batch
@@ -108,7 +108,7 @@ class EpisodicBuffer:
                         hid_out=self.next_hxs_buf[self.path_start_idx])
             data = {k: torch.as_tensor(v, dtype=torch.float32).to(self.device)
                     for k, v in data.items()}
-            self.exploration_batch.append(data)
+            self.exploration_batch = np.append(self.exploration_batch, data)
 
         self.path_start_idx = self.ptr
 
@@ -133,7 +133,7 @@ class EpisodicBuffer:
 
         data = {k: torch.as_tensor(v, dtype=torch.float32).to(self.device)
                 for k, v in data.items()}
-        self.exploitation_batch.append(data)
+        self.exploitation_batch = np.append(self.exploitation_batch, data)
 
         if self.use_exploration_sampling:
             # Exploration batch
@@ -150,11 +150,11 @@ class EpisodicBuffer:
                         hidden=self.hxs_buf[self.path_start_idx])
             data = {k: torch.as_tensor(v, dtype=torch.float32).to(self.device)
                     for k, v in data.items()}
-            self.exploration_batch.append(data)
+            self.exploration_batch = np.append(self.exploration_batch, data)
 
         self.path_start_idx = self.ptr
 
-    def get(self, batch_size=None):
+    def get(self, batch_size=None, p_exploration=0.3):
         """
         Call this at the end of an epoch to get all of the data from
         the buffer, with advantages appropriately normalized (shifted to have
@@ -167,24 +167,48 @@ class EpisodicBuffer:
             # use_exploration_sampling
             if batch_size is not None:
                 k = batch_size
-                # 30 % explore batches
-                p = k//3
+                p = int(k*p_exploration)
 
                 # p explore-rollouts
-                explore = np.random.choice(self.exploration_batch, p)
+                explore_idx = np.random.choice(
+                    np.arange(len(self.exploration_batch)),
+                    p,
+                    replace=False)
+
+                b_mask = np.ones_like(self.exploration_batch, dtype=bool)
+                # Exclude p explore rollouts
+                b_mask[explore_idx] = False
+
                 # k-p exploit-rollouts
-                exploit = np.random.choice(self.exploitation_batch, k-p)
-                return [*explore, *exploit]
+                explore = self.exploration_batch[explore_idx]
+                exploit = self.exploitation_batch[b_mask]
+
+                exploit = np.random.choice(
+                    self.exploitation_batch, k-p, replace=False)
+
+                batch = [*explore, *exploit]
+                np.random.shuffle(batch)
+                return batch
 
             k = len(self.exploitation_batch)
-            # 30 % explore batches
-            p = k//3
+            p = int(k*p_exploration)
 
             # p explore-rollouts
-            explore = np.random.choice(self.exploration_batch, p)
+            explore_idx = np.random.choice(
+                np.arange(len(self.exploration_batch)), p, replace=False)
+
+            b_mask = np.ones_like(self.exploration_batch, dtype=bool)
+            # Exclude p explore rollouts
+            b_mask[explore_idx] = False
+
             # k-p exploit-rollouts
-            exploit = np.random.choice(self.exploitation_batch, k-p)
-            return [*explore, *exploit]
+            explore = self.exploration_batch[explore_idx]
+            exploit = self.exploitation_batch[b_mask]
+
+            batch = [*explore, *exploit]
+            np.random.shuffle(batch)
+            return batch
+
         if batch_size is not None:
             np.random.shuffle(self.exploitation_batch)
             return np.random.choice(self.exploitation_batch, batch_size)
@@ -205,6 +229,6 @@ class EpisodicBuffer:
             self.next_hxs_buf = np.zeros_like(self.next_hxs_buf)
         self.hxs_buf = np.zeros_like(self.hxs_buf)
 
-        self.exploration_batch = []
-        self.exploitation_batch = []
+        self.exploration_batch = np.array([])
+        self.exploitation_batch = np.array([])
         self.ptr, self.path_start_idx, self.max_size = 0, 0, self.size

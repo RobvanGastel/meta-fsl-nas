@@ -24,8 +24,8 @@ class RolloutBuffer:
                  use_exploration_sampling=False, gamma=0.99, lam=0.95):
 
         # Pick sampling episodes or time-steps
-        self.exploration_batch = []
-        self.exploitation_batch = []
+        self.exploration_batch = np.array([])
+        self.exploitation_batch = np.array([])
 
         self.device = device
         self.obs_dim = obs_dim
@@ -116,10 +116,9 @@ class RolloutBuffer:
 
         data = {k: torch.as_tensor(v, dtype=torch.float32).to(self.device)
                 for k, v in data.items()}
-        self.exploitation_batch.append(data)
+        self.exploitation_batch = np.append(self.exploitation_batch, data)
 
         # EXPLORATION calculation
-        # TODO: duplicate episodes
         # set the return of the episode to 0
 
         if self.use_exploration_sampling:
@@ -148,30 +147,43 @@ class RolloutBuffer:
 
             data = {k: torch.as_tensor(v, dtype=torch.float32).to(self.device)
                     for k, v in data.items()}
-            self.exploration_batch.append(data)
+            self.exploration_batch = np.append(self.exploration_batch, data)
 
         self.path_start_idx = self.ptr
 
-    def get(self):
+    def get(self, p_exploration=0.3):
         """
         Call this at the end of an epoch to get all of the data from
         the buffer, with advantages appropriately normalized (shifted to have
         mean zero and std one). Also, resets some pointers in the buffer.
-        """
-        # buffer has to be full before you can get
-        # assert self.ptr == self.max_size
 
+        Args:
+            p_exploration (float, optional): Percentange of exploration samples
+            Defaults to 0.3, 30 percent of the batch for exploration. Only used
+            in crase of exploration sampling.
+
+        Returns:
+            list: batch of episodes
+        """
         if self.use_exploration_sampling:
             k = len(self.exploitation_batch)
-            # 30% of the batch for exploration
-            p = k//3
+            p = int(k*p_exploration)
 
             # p explore-rollouts
-            explore = np.random.choice(self.exploration_batch, p)
-            # k-p exploit-rollouts
-            exploit = np.random.choice(self.exploitation_batch, k-p)
+            explore_idx = np.random.choice(
+                np.arange(len(self.exploration_batch)), p, replace=False)
 
-            return [*explore, *exploit]
+            b_mask = np.ones_like(self.exploration_batch, dtype=bool)
+            # Exclude p explore rollouts
+            b_mask[explore_idx] = False
+
+            # k-p exploit-rollouts
+            explore = self.exploration_batch[explore_idx]
+            exploit = self.exploitation_batch[b_mask]
+
+            batch = [*explore, *exploit]
+            np.random.shuffle(batch)
+            return batch
 
         np.random.shuffle(self.exploitation_batch)
         return self.exploitation_batch
@@ -187,8 +199,8 @@ class RolloutBuffer:
         self.prev_act_buf = np.zeros_like(self.prev_act_buf)
         self.prev_rew_buf = np.zeros_like(self.prev_rew_buf)
 
-        self.exploration_batch = []
-        self.exploitation_batch = []
+        self.exploration_batch = np.array([])
+        self.exploitation_batch = np.array([])
         self.ptr, self.path_start_idx, self.max_size = 0, 0, self.size
 
 
@@ -220,8 +232,9 @@ class PPO(RL_agent):
             self.total_traj = 0
             self.current_test_epoch = 0
             self.current_epoch = 0
-
-        self.steps_per_epoch = self.number_of_trajectories * 110  # steps_per_epoch
+            self.steps_per_epoch = self.number_of_trajectories * self.max_ep_len
+        else:
+            self.steps_per_epoch = steps_per_epoch
 
         # epochs = 1, if every task gets a single trial
         self.epochs = epochs
@@ -371,7 +384,7 @@ class PPO(RL_agent):
                     h_in = h_out
 
                     a, v, logp_a, h_out = self.get_action(o, a2, r2, h_in)
-                    next_o, r, d, info = self.env.step(a)
+                    next_o, r, d, info = self.env.step(a[0])
                     ep_ret += r
                     ep_len += 1
 
@@ -408,8 +421,8 @@ class PPO(RL_agent):
                 self.logger.store(EpRet=ep_ret, EpLen=ep_len,
                                   EpMaxAcc=ep_max_acc)
 
-                if tr >= 25 and \
-                        tr % 25 == 0:
+                if tr >= 10 and \
+                        tr % 10 == 0:
                     self.update()
                     self.storage.reset()
                 # Perform PPO update!
@@ -417,6 +430,7 @@ class PPO(RL_agent):
                 # self.storage.reset()
 
             self.current_epoch += 1
+
             self._log_trial(self.current_epoch, start_time)
 
     def train_step_agent(self, env):
@@ -467,6 +481,7 @@ class PPO(RL_agent):
                 terminal = d or timeout
                 epoch_ended = t == self.steps_per_epoch-1
 
+                # TODO: Introduce variable for update step
                 if t >= 1000 and \
                         self.global_steps % 1000 == 0:
                     self.update()
@@ -509,7 +524,7 @@ class PPO(RL_agent):
 
         h = torch.zeros([1, 1, self.hidden_size]).to(self.device)
         start_time = time.time()
-        a2, r2 = 0, 0
+        a2, r2 = np.array([[0]]), 0
 
         for _ in range(num_test_episodes):
             o, d, ep_ret, ep_len = self.test_env.reset(), False, 0, 0
@@ -544,7 +559,7 @@ class PPO(RL_agent):
         log_board = {
             'Performance': [
                 'EpRet', 'EpLen', 'VVals', 'Entropy',
-                'KL', 'ClipFrac'
+                'KL', 'ClipFrac', 'EpMaxAcc'
             ],
             'Loss': ['LossPi', 'LossV', 'Loss',
                      'DeltaLossPi', 'DeltaLossV',

@@ -20,7 +20,8 @@ from metanas.utils import utils
 from metanas.utils.cosine_power_annealing import cosine_power_annealing
 from metanas.meta_optimizer.agents.Random.random import RandomAgent
 from metanas.meta_optimizer.agents.SAC.rl2_sac import SAC
-from metanas.env.nas import NasEnv
+from metanas.meta_optimizer.agents.PPO.rl2_ppo import PPO
+from metanas.env.nas_env import NasEnv
 
 
 """ Script for metanas & baseline trainings
@@ -197,9 +198,10 @@ def _init_meta_rl_agent(config, meta_model):
                             steps_per_epoch=config.agent_steps_per_trial,
                             num_test_episodes=config.num_test_episodes,
                             logger_kwargs=config.logger_kwargs)
-    else:
+    elif config.agent == "SAC":
         ac_kwargs = dict(hidden_size=[config.agent_hidden_size]*2)
 
+        # TODO: Current parameters out-dated, use # episodes per trial
         # env passed to set shapes of the network
         agent = SAC(config, env_normal, ac_kwargs=ac_kwargs,
                     gamma=config.gamma,
@@ -218,6 +220,25 @@ def _init_meta_rl_agent(config, meta_model):
                     save_freq=config.save_freq,
                     num_test_episodes=config.num_test_episodes
                     )
+    elif config.agent == "ppo":
+        agent = PPO(config,
+                    env_normal,
+                    logger_kwargs=config.logger_kwargs,
+                    seed=config.seed,
+                    save_freq=config.save_freq,
+                    gamma=config.gamma,
+                    lr=config.agent_lr,
+                    # clip_ratio
+                    ppo_iter=4,
+                    lam=0.97,
+                    epochs=config.agent_trials_per_mdp,  # 1 trial
+                    hidden_size=config.agent_hidden_size,
+                    count_trajectories=True,
+                    number_of_trajectories=50,
+                    exploration_sampling=True)
+
+    else:
+        raise ValueError(f"The given agent {config.agent} is not supported.")
 
     return agent
 
@@ -649,6 +670,7 @@ def train(
             experiment = {
                 "genotype": [task_info.genotype for task_info in task_infos],
                 "meta_genotype": meta_model.genotype(),
+
                 "alphas": [alpha for alpha in meta_model.alphas()],
             }
             experiment.update(train_info)
