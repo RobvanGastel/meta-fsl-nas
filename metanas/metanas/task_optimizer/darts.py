@@ -238,7 +238,6 @@ class Darts:
 
                 if num_of_skip_connections is not None \
                         and self.config.use_limit_skip_connections:
-                    # and self.config.use_search_space_regularization:
 
                     gt.limit_skip_connections_alphas(
                         self.model.alpha_normal,
@@ -343,10 +342,6 @@ class Architect:
         self.w_momentum = w_momentum
         self.w_weight_decay = w_weight_decay
         self.use_first_order_darts = use_first_order_darts
-
-    def set_network(self, net):
-        self.net = net
-        self.v_net = copy.deepcopy(net)
 
     def virtual_step(self, train_X, train_y, xi, w_optim):
         """

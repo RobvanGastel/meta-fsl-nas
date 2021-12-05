@@ -35,18 +35,7 @@ cf. 3rd-party-licenses.txt in root directory.
 def set_hyperparameter(config):
     """Load/set hyperparameter settings based on predefined config"""
 
-    # Default P-DARTS settings
-    # 3 stages as defined in P-DARTS, 5.1.1, keep configuration the same as
-    # DARTS in the initial stage.
-    config.architecture_stages = 2
-
-    # The number of operations preserved on each edge of the super-network are,
-    # 8, 5, and 3 for stage 1, 2 and 3, respectively.
-    # In our case, the third stage will never drop operations.
-    config.drop_number_operations = [3, 2]
-
     # Dropout rate on the skip-connections
-    config.dropout_ops = [0.3, 0.6]
     config.dropout_scale_factor = 0.2
 
     # Dropout rate single stage skip-connections
@@ -69,22 +58,6 @@ def set_hyperparameter(config):
 
     elif config.hp_setting == "og_metanas":  # setting for MetaNAS
         config.task_train_steps = 6
-        config.n_train = 15
-        config.batch_size = 20
-        config.batch_size_test = 10
-        config.meta_batch_size = 10
-        config.w_lr = 0.005
-        config.alpha_lr = 0.005
-        config.w_meta_lr = 1.0
-        config.a_meta_lr = 0.6
-        config.a_meta_anneal = 0
-        config.a_task_anneal = 0
-        config.w_meta_anneal = 0
-        config.w_task_anneal = 0
-
-    # Settings for MetaNAS ablation study
-    elif config.hp_setting == "og_pdarts":
-        config.task_train_steps = 3
         config.n_train = 15
         config.batch_size = 20
         config.batch_size_test = 10

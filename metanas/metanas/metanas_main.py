@@ -92,11 +92,8 @@ def meta_architecture_search(
     else:
         raise RuntimeError(f"Dataset {config.dataset} is not supported.")
 
-    # SharpDARTS
     if config.primitives_type == "fewshot":
         config.primitives = gt.PRIMITIVES_FEWSHOT
-    elif config.primitives_type == "sharp":
-        config.primitives = gt.PRIMITIVES_SHARP
     elif config.primitives_type == "nasbench201":
         config.primitives = gt.PRIMITIVES_NAS_BENCH_201
     else:
@@ -1039,18 +1036,6 @@ if __name__ == "__main__":
     # P-DARTS & SharpDARTS
     # Enabling both approaches, specificly for ablation study
     parser.add_argument(
-        "--use_search_space_approximation",
-        action="store_true",
-        help="Whether to enable P-DARTS, search space approximation",
-    )
-
-    parser.add_argument(
-        "--use_search_space_regularization",
-        action="store_true",
-        help="Whether to enable P-DARTS, search space regularization",
-    )
-
-    parser.add_argument(
         "--dropout_skip_connections",
         action="store_true",
         help="Use dropouts on skip-connections",
@@ -1070,12 +1055,9 @@ if __name__ == "__main__":
                         help="Either scalar or max_w")
 
     parser.add_argument("--primitives_type", default="fewshot",
-                        help="Either fewshot, nasbench201 or sharp")
+                        help="Either fewshot, nasbench201")
 
     parser.add_argument("--use_cosine_power_annealing", action="store_true")
-
-    # Reinit doesn't perform well
-    parser.add_argument("--use_reinitialize_model", action="store_true")
 
     # Architectures
     parser.add_argument("--init_channels", type=int, default=16)

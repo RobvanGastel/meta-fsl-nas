@@ -78,43 +78,6 @@ OPS_NAS_BENCH_201 = {
 }
 
 
-OPS_SHARPDARTS = {
-    'none': lambda C, stride, affine: Zero(stride),
-    'avg_pool_3x3': lambda C, stride, affine: ResizablePool(
-        C, C, 3, stride, 1, affine=affine, pool_type=nn.AvgPool2d),
-    'max_pool_3x3': lambda C, stride, affine: ResizablePool(
-        C, C, 3, stride, 1, affine=affine),
-    'skip_connect': lambda C, stride, affine: Identity()
-    if stride == 1
-    else FactorizedReduce(C, C, affine=affine),
-    'sep_conv_3x3': lambda C, stride, affine: SharpSepConv(
-        C, C, 3, stride, 1, affine=affine),
-    'sep_conv_5x5': lambda C, stride, affine: SharpSepConv(
-        C, C, 5, stride, 2, affine=affine),
-    'flood_conv_3x3': lambda C, stride, affine: SharpSepConv(
-        C, C, 3, stride, 1, affine=affine, C_mid_mult=4),
-    'flood_conv_5x5': lambda C, stride, affine: SharpSepConv(
-        C, C, 5, stride, 2, affine=affine, C_mid_mult=4),
-    'sep_conv_7x7': lambda C, stride, affine: SharpSepConv(
-        C, C, 7, stride, 3, affine=affine),
-    'dil_conv_3x3': lambda C, stride, affine: SharpSepConv(
-        C, C, 3, stride, 2, dilation=2, affine=affine),
-    'dil_conv_5x5': lambda C, stride, affine: SharpSepConv(
-        C, C, 5, stride, 4, dilation=2, affine=affine),
-    'conv_7x1_1x7': lambda C, stride, affine: FacConv(
-        C, C, 7, stride, 3, affine=affine
-    ),
-    'dil_flood_conv_3x3': lambda C, stride, affine: SharpSepConv(
-        C, C, 3, stride, 2, dilation=2, affine=affine, C_mid_mult=4),
-    'dil_flood_conv_5x5': lambda C, stride, affine: SharpSepConv(
-        C, C, 5, stride, 2, dilation=2, affine=affine, C_mid_mult=4),
-    'choke_conv_3x3': lambda C, stride, affine: SharpSepConv(
-        C, C, 3, stride, 1, affine=affine, C_mid=32),
-    'dil_choke_conv_3x3': lambda C, stride, affine: SharpSepConv(
-        C, C, 3, stride, 2, dilation=2, affine=affine, C_mid=32),
-}
-
-
 def drop_path_(x, drop_prob, training):
     if training and drop_prob > 0.0:
         keep_prob = 1.0 - drop_prob
@@ -188,31 +151,6 @@ class StdConv(nn.Module):
 
     def forward(self, x):
         return self.net(x)
-
-
-class SharpSepConv(nn.Module):
-    def __init__(self, C_in, C_out, kernel_size, stride,
-                 padding=1, dilation=1, affine=True, C_mid_mult=1, C_mid=None):
-        super(SharpSepConv, self).__init__()
-        cmid = int(C_out * C_mid_mult)
-        cmid = C_mid if C_mid else cmid
-        self.op = nn.Sequential(
-            nn.ReLU(inplace=False),
-            nn.Conv2d(C_in, C_in, kernel_size, stride,
-                      padding, dilation, groups=C_in, bias=0),
-            nn.Conv2d(C_in, cmid, kernel_size=1,
-                      padding=0, bias=0),
-            nn.BatchNorm2d(cmid, affine=affine),
-            nn.ReLU(inplace=False),
-            nn.Conv2d(cmid, cmid, kernel_size,
-                      stride=1, padding=(kernel_size-1)//2,
-                      dilation=1, groups=cmid, bias=0),
-            nn.Conv2d(cmid, C_out, kernel_size=1,
-                      padding=0, bias=0),
-            nn.BatchNorm2d(C_out, affine=affine))
-
-    def forward(self, x):
-        return self.op(x)
 
 
 class ResizablePool(nn.Module):
@@ -368,9 +306,7 @@ class MixedOp(nn.Module):
         self._ops = nn.ModuleList()
 
         for primitive in PRIMITIVES:
-            if primitive_space == "sharp":
-                op = OPS_SHARPDARTS[primitive](C, stride, affine=False)
-            elif primitive_space == "fewshot":
+            if primitive_space == "fewshot":
                 op = OPS[primitive](C, stride, affine=False)
             elif primitive_space == "nasbench201":
                 op = OPS_NAS_BENCH_201[primitive](C, stride, affine=False)
