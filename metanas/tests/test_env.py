@@ -1,8 +1,7 @@
-
 import metanas.utils.genotypes as gt
 from metanas.models.search_cnn import SearchCNNController
 from metanas.utils.test_config import init_config
-from metanas.env.nas import NasEnv
+from metanas.env.nas_env import NasEnv
 import unittest
 
 import copy
@@ -37,11 +36,19 @@ class TestEnvironment(unittest.TestCase):
         self.env = NasEnv(config, self.meta_model, test_env=True)
 
     def test_all_actions(self):
+        """Test case: Check if all operations still function
+        """
+        self.env.reset()
         for a in range(0, self.env.action_space.n):
             o, r, d, info_dict = self.env.step(a)
             print(info_dict)
 
     def test_random_walk(self):
+        """Test case: Random walk should not yield, NaN values
+        in the obeservation. Secondly, rewards should be between
+        [min_reward, max_reward].
+        """
+
         total_steps = 0
         n = 200
         for _ in range(n):
@@ -51,7 +58,7 @@ class TestEnvironment(unittest.TestCase):
 
             while not(d or (ep_len == self.env.max_ep_len)):
                 a = self.env.action_space.sample()
-                o, r, d, _ = self.env.step(a)
+                o, r, d, info_dict = self.env.step(a)
                 ep_len += 1
                 total_steps += 1
 
@@ -62,13 +69,21 @@ class TestEnvironment(unittest.TestCase):
                     print(self.env.alphas)
                     print(o)
 
+                print(info_dict)
+                # Evaluate reward
+                self.assertGreaterEqual(r, -1)
+                self.assertLessEqual(r, 2)
+
+                # Evaluate obs for NaNs
                 self.assertEqual(np.any(np.isnan(o)), False)
 
             self.meta_model.load_state_dict(meta_state)
             self.env.reset()
-        print(f"{n} random walks with a total of {total_steps}")
+        print(f"{n} random walks with a total of {total_steps} steps")
 
     def test_repeated_one_actions(self):
+        """Test case: Check if repeating one increase action yields NaNs
+        """
         total_steps = 0
         n = 200
         for _ in range(n):
@@ -80,8 +95,6 @@ class TestEnvironment(unittest.TestCase):
                 ep_len += 1
                 total_steps += 1
 
-                # print(self.env.alphas)
-                # print(o)
                 # Testing the alpha values for NaN
                 # indice for the observations [8:16]
                 if np.any(np.isnan(o)):

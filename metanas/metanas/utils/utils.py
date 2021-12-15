@@ -128,12 +128,14 @@ def set_hyperparameter(config):
 
 
 def set_rl_hyperparameters(config):
-
     config.logger_kwargs = setup_logger_kwargs(config.path,
                                                seed=config.seed)
-    print(config.logger_kwargs)
     config.agent_steps_per_trial = 500
     config.num_test_episodes = 3
+
+    # Graph walk logging
+    config.graph_walk_index = config.start_epoch
+    config.graph_walk_path = os.path.join(config.path + "graph_walk.shlv")
 
     if config.agent == "ppo":
         config.gamma = 0.99

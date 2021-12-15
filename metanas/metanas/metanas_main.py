@@ -273,7 +273,7 @@ def _build_model(config, task_distribution, normalizer):
             feature_scale_rate=1,
             primitive_space=config.primitives_type,
             weight_regularization=config.darts_regularization,
-            dropout_skip_connections=True if config.use_search_space_regularization or config.dropout_skip_connections else False,
+            dropout_skip_connections=True if config.dropout_skip_connections else False,
             use_hierarchical_alphas=config.use_hierarchical_alphas,
             use_pairwise_input_alphas=config.use_pairwise_input_alphas,
             alpha_prune_threshold=config.alpha_prune_threshold,
@@ -626,6 +626,30 @@ def train(
 
             task_infos = []
             for task in meta_test_batch:
+                # Set few-shot task
+                env_normal.set_task(task, meta_state)
+                env_reduce.set_task(task, meta_state)
+
+                # Now optimize alphas for better initialization
+                meta_rl_agent.train_agent(env_normal)
+                meta_rl_agent.train_agent(env_reduce)
+
+                # # In warm-up don't change the alphas
+                if meta_epoch <= config.warm_up_epochs:
+                    meta_model.load_state_dict(meta_state)
+                else:
+                    # Obtain better meta_model state for task-learning
+                    # and set.
+                    normal_alphas = env_normal.get_max_alphas()
+                    reduce_alphas = env_reduce.get_max_alphas()
+
+                    meta_model.alpha_normal = nn.ParameterList()
+                    meta_model.alpha_reduce = nn.ParameterList()
+
+                    for n_alpha, r_alpha in zip(normal_alphas, reduce_alphas):
+                        meta_model.alpha_normal.append(nn.Parameter(n_alpha))
+                        meta_model.alpha_reduce.append(nn.Parameter(r_alpha))
+
                 task_infos += [
                     task_optimizer.step(
                         task,
@@ -667,7 +691,6 @@ def train(
             experiment = {
                 "genotype": [task_info.genotype for task_info in task_infos],
                 "meta_genotype": meta_model.genotype(),
-
                 "alphas": [alpha for alpha in meta_model.alphas()],
             }
             experiment.update(train_info)

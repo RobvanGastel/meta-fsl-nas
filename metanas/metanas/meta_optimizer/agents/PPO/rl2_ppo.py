@@ -1,3 +1,4 @@
+import shelve
 import numpy as np
 
 import time
@@ -236,6 +237,9 @@ class PPO(RL_agent):
         else:
             self.steps_per_epoch = steps_per_epoch
 
+        # NAS environment
+        self.graph_walks = []
+
         # epochs = 1, if every task gets a single trial
         self.epochs = epochs
 
@@ -351,6 +355,8 @@ class PPO(RL_agent):
             DeltaLossV=(pi_info['loss_v'] - pi_info_old['loss_v']))
 
     def train_agent(self, env):
+        self.graph_walks = []
+
         if self.count_trajectories:
             # Use k trajectories per trial
             self.train_ep_agent(env)
@@ -376,7 +382,7 @@ class PPO(RL_agent):
 
             # To sample k trajectories
             for tr in range(self.number_of_trajectories):
-                d, ep_ret, ep_len, ep_max_acc = False, 0, 0, 0
+                d, ep_ret, ep_len = False, 0, 0
                 o = self.env.reset()
 
                 while not(d or (ep_len == self.max_ep_len)):
@@ -384,17 +390,15 @@ class PPO(RL_agent):
                     h_in = h_out
 
                     a, v, logp_a, h_out = self.get_action(o, a2, r2, h_in)
-                    next_o, r, d, info = self.env.step(a[0])
+                    next_o, r, d, info_dict = self.env.step(a[0])
                     ep_ret += r
                     ep_len += 1
 
-                    # DARTS information
-                    if 'acc' in info:
-                        acc = info['acc']
-                        if acc is not None and acc > ep_max_acc:
-                            ep_max_acc = acc
+                    # DARTS environment information logging
+                    if 'acc' in info_dict:
+                        self._log_nas_info_dict(info_dict)
 
-                            # save and log
+                    # save and log
                     self.storage.store(o, a, r, logp_a, v, a2,
                                        r2, h_in.cpu().numpy())
                     self.logger.store(VVals=v)
@@ -418,13 +422,13 @@ class PPO(RL_agent):
                     v = 0
                 self.storage.finish_path(v)
 
-                self.logger.store(EpRet=ep_ret, EpLen=ep_len,
-                                  EpMaxAcc=ep_max_acc)
+                self.logger.store(EpRet=ep_ret, EpLen=ep_len)
 
                 if tr >= 10 and \
                         tr % 10 == 0:
                     self.update()
                     self.storage.reset()
+
                 # Perform PPO update!
                 # self.update()
                 # self.storage.reset()
@@ -433,13 +437,16 @@ class PPO(RL_agent):
 
             self._log_trial(self.current_epoch, start_time)
 
+        # Write graph walks
+        self._log_graph_walks()
+
     def train_step_agent(self, env):
         assert env is not None, "Pass a task for the current trial"
 
         # Prepare for interaction with environment
         self.env = env
         start_time = time.time()
-        o, ep_ret, ep_len, ep_max_acc = self.env.reset(), 0, 0, 0
+        o, ep_ret, ep_len = self.env.reset(), 0, 0
 
         # RL^2 variables
         h_in = torch.zeros([1, 1, self.hidden_size]).to(self.device)
@@ -459,6 +466,10 @@ class PPO(RL_agent):
                 ep_ret += r
                 ep_len += 1
 
+                # DARTS information
+                if 'acc' in info_dict:
+                    self._log_nas_info_dict(info_dict)
+
                 # save and log
                 self.storage.store(o, a, r, logp_a, v, a2,
                                    r2, h_in.cpu().numpy())
@@ -470,12 +481,6 @@ class PPO(RL_agent):
 
                 # Update obs (critical!)
                 o = next_o
-
-                # DARTS information
-                if 'acc' in info_dict:
-                    acc = info_dict['acc']
-                    if acc is not None and acc > ep_max_acc:
-                        ep_max_acc = acc
 
                 timeout = ep_len == self.max_ep_len
                 terminal = d or timeout
@@ -504,10 +509,8 @@ class PPO(RL_agent):
 
                     if terminal:
                         # only save EpRet / EpLen if trajectory finished
-                        self.logger.store(EpRet=ep_ret, EpLen=ep_len,
-                                          EpMaxAcc=ep_max_acc)
+                        self.logger.store(EpRet=ep_ret, EpLen=ep_len)
                     o, ep_ret, ep_len = self.env.reset(), 0, 0
-                    ep_max_acc = 0
 
                 # Increase global steps for the next trial
                 self.global_steps += 1
@@ -519,6 +522,9 @@ class PPO(RL_agent):
 
             self._log_trial(epoch, start_time)
 
+        # Write graph walks
+        self._log_graph_walks()
+
     def test_agent(self, test_env, num_test_episodes=10):
         self.test_env = test_env
 
@@ -528,7 +534,6 @@ class PPO(RL_agent):
 
         for _ in range(num_test_episodes):
             o, d, ep_ret, ep_len = self.test_env.reset(), False, 0, 0
-            ep_max_acc = 0
 
             while not(d or (ep_len == self.max_ep_len)):
                 a, _, _, h = self.get_action(o, a2, r2, h)
@@ -544,35 +549,90 @@ class PPO(RL_agent):
 
                 # DARTS information
                 if 'acc' in info_dict:
-                    acc = info_dict['acc']
-                    if acc is not None and acc > ep_max_acc:
-                        ep_max_acc = acc
+                    self._log_nas_info_dict(info_dict)
 
                 self.global_test_steps += 1
 
             # self.logger.store(TestEpRet=ep_ret, TestEpLen=ep_len,
             #                   TestEpMaxAcc=ep_max_acc)
-        self._log_test_trial(self.global_test_steps, start_time)
+        # self._log_test_trial(self.global_test_steps, start_time)
+    def _log_graph_walks(self):
+        d = shelve.open(self.config.graph_walk_path)
+        d[str(self.config.graph_walk_index)] = self.graph_walks
+        d.close()
+        self.config.graph_walk_index += 1
+
+    def _log_nas_info_dict(self, info_dict):
+        """Log NAS environment information
+
+        Args:
+            info_dict (dict): action dict
+        """
+        # Accuracy information
+        acc = info_dict['acc']
+        if acc is not None:
+            self.logger.store(
+                Acc=info_dict['acc']
+            )
+
+        # Log graph walk information
+        self.logger.store(
+            NumAlphaAdj=info_dict[
+                'alpha_adjustments'])
+        self.logger.store(
+            NumEstimations=info_dict[
+                'acc_estimations'])
+        self.logger.store(
+            NumEdgeTrav=info_dict[
+                'edge_traversals'])
+        self.logger.store(
+            NumIllegalEdgeTrav=info_dict[
+                'illegal_edge_traversals'])
+        self.logger.store(
+            NumAlphaAdjBeforeTrav=info_dict[
+                'alpha_adj_before_trav'])
+
+        # End of episode logging
+        if 'unique_edges' in info_dict:
+            self.logger.store(
+                UniqueEdges=info_dict['unique_edges']
+            )
+
+        # Graph walk logging
+        if 'path_graph' in info_dict:
+            self.graph_walks.append(info_dict['path_graph'])
 
     def _log_trial(self, epoch, start_time):
         # Log to tensorboard
         log_board = {
             'Performance': [
                 'EpRet', 'EpLen', 'VVals', 'Entropy',
-                'KL', 'ClipFrac', 'EpMaxAcc'
+                'KL', 'ClipFrac', 'Time'
+            ],
+            'Environment': [
+                'NumAlphaAdj', 'NumEstimations', 'Acc',
+                'NumEdgeTrav', 'NumIllegalEdgeTrav',
+                'NumAlphaAdjBeforeTrav', 'UniqueEdges'
             ],
             'Loss': ['LossPi', 'LossV', 'Loss',
                      'DeltaLossPi', 'DeltaLossV',
-                     'DeltaLoss']}
+                     'DeltaLoss'
+                     ]}
 
         for key, value in log_board.items():
             for val in value:
-                mean, std = self.logger.get_stats(val)
-                if key == 'Performance':
-                    self.summary_writer.add_scalar(
-                        key+'/Average'+val, mean, self.global_steps)
-                    self.summary_writer.add_scalar(
-                        key+'/Std'+val, std, self.global_steps)
+                if val is not "Time":
+                    mean, std = self.logger.get_stats(val)
+                if key == 'Performance' or key == "Environment":
+                    if val == 'Time':
+                        self.summary_writer.add_scalar(
+                            key+'/Time', time.time()-start_time,
+                            self.global_steps)
+                    else:
+                        self.summary_writer.add_scalar(
+                            key+'/Average'+val, mean, self.global_steps)
+                        self.summary_writer.add_scalar(
+                            key+'/Std'+val, std, self.global_steps)
                 else:
                     self.summary_writer.add_scalar(
                         key+'/'+val, mean, self.global_steps)
@@ -582,7 +642,9 @@ class PPO(RL_agent):
         self.logger.log_tabular('EpRet', with_min_and_max=True)
         self.logger.log_tabular('EpLen', average_only=True)
         # Ignore this metric for non-NAS environments
-        self.logger.log_tabular('EpMaxAcc', with_min_and_max=True)
+        self.logger.log_tabular(
+            'Acc', average_only=True, with_min_and_max=True)
+        # self.logger.log_tabular('EpMaxAcc', with_min_and_max=True)
         self.logger.log_tabular('VVals', with_min_and_max=True)
         self.logger.log_tabular('TotalEnvInteracts',
                                 self.global_steps)
@@ -594,12 +656,23 @@ class PPO(RL_agent):
         self.logger.log_tabular('DeltaLoss', average_only=True)
         self.logger.log_tabular('Entropy', average_only=True)
         self.logger.log_tabular('KL', average_only=True)
+
+        self.logger.log_tabular('NumAlphaAdj', average_only=True)
+        self.logger.log_tabular('NumEstimations', average_only=True)
+        self.logger.log_tabular('NumEdgeTrav', average_only=True)
+        self.logger.log_tabular(
+            'NumIllegalEdgeTrav', average_only=True)
+        self.logger.log_tabular(
+            'NumAlphaAdjBeforeTrav', average_only=True)
+        self.logger.log_tabular(
+            'UniqueEdges', average_only=True)
+
         self.logger.log_tabular('ClipFrac', average_only=True)
         self.logger.log_tabular('Time', time.time()-start_time)
         self.logger.dump_tabular()
 
-    def _log_test_trial(self, t, start_time):
-        pass
+    # def _log_test_trial(self, t, start_time):
+    #     pass
         # trial = (t+1) // self.steps_per_epoch
 
         # # Save model

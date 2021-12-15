@@ -118,9 +118,6 @@ class PredictorModel(nn.Module):
 
         input_vec = torch.cat(input_vec, dim=1)
 
-        # return self.pred_fc(input_vec)
-        # TODO: Adjusted to range (0, 1)
-
         return self.acc_fc(input_vec)
 
     def get_device(self):

@@ -1,14 +1,11 @@
 
-import functools
 import logging
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.autograd import Variable
 from torch.nn.parallel._functions import Broadcast
 import scipy.special
-import copy
+
 from metanas.models import ops
 from metanas.utils import genotypes as gt
 

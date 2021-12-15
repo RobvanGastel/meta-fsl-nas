@@ -36,36 +36,63 @@ class NasEnv(gym.Env):
         self.cell_type = cell_type
         self.primitives = config.primitives
         self.n_ops = len(config.primitives)
-        self.reward_estimation = reward_estimation
 
         self.test_phase = test_phase
         self.meta_model = meta_model
 
-        # Task reward estimator
+        # Task
+        self.current_task = None
+
+        # Store reward previous estimation
+        self.baseline_acc = 0
+
+        # Store best alphas/or model obtained yet,
+        self.max_alphas = []
+        self.max_acc = 0.0
+
+        # Task acuracy estimator
+        self.reward_estimation = reward_estimation
         if self.reward_estimation:
             self.meta_predictor = MetaPredictor(config)
 
             # remove last fully-connected layer
-            model = models.resnet18(pretrained=True).eval()
+            model = models.resnet18(pretrained=True).eval().to(config.device)
             self.feature_extractor = torch.nn.Sequential(
                 *list(model.children())[:-1])
 
-        # The task is set in the meta-loop
-        self.current_task = None
-        self.max_ep_len = max_ep_len  # max_steps
+        # weights optimizer
+        self.w_optim = torch.optim.Adam(
+            self.meta_model.weights(),
+            lr=self.config.w_lr,
+            betas=(0.0, 0.999),
+            weight_decay=self.config.w_weight_decay,
+        )
 
-        # TODO: Properly pass range
-        self.reward_range = (-0.1, 1)
-        # Pick reward range,
-        # self.reward_range = (-1, 1)
+        # Tracking statistics
+        self.init_tracking_vars()
 
-        # Initialize the step counter
+        # Environment/Gym.Env variables
+        self.do_update = False
+        self.max_ep_len = max_ep_len  # max_steps per episode
+
+        # Reward range
+        # TODO: Configure setting
+        self.encourage_increase = 2.0
+        self.ecnourage_decrease = 0.5
+
+        self.encourage_exploration = True
+
+        self.max_rew = 1.0
+        self.min_rew = -1.0
+        self.reward_range = (self.min_rew, self.max_rew)
+        if self.encourage_exploration:
+            self.reward_range = (self.min_rew, self.max_rew * 2.0)
+
+        # Episode step counter
         self.step_count = 0
         self.terminate_episode = False
 
-        # Set baseline accuracy to scale the reward
-        self.baseline_acc = 0
-
+        # DARTS Cell graph
         # Initialize State / Observation space
         # Intermediate + input nodes
         self.n_nodes = self.config.nodes + 2
@@ -80,21 +107,27 @@ class NasEnv(gym.Env):
         self.initialize_observation_space()
 
         # Initialize action space
-        # |A| + 2*|O| + 1, the +1 for the termination
+        # |A| + 2*|O| + 1, +1 for the termination
         action_size = len(self.A) + 2*len(self. primitives) + 1
         self.action_space = spaces.Discrete(action_size)
 
-        # Store best alphas/or model obtained yet,
-        self.max_alphas = []
-        self.max_acc = 0.0
+        # Settings specific for unit testing
+        if test_env:
+            self.meta_state = copy.deepcopy(meta_model.state_dict())
 
-        # weights optimizer
-        self.w_optim = torch.optim.Adam(
-            self.meta_model.weights(),
-            lr=self.config.w_lr,
-            betas=(0.0, 0.999),
-            weight_decay=self.config.w_weight_decay,
-        )
+    def init_tracking_vars(self):
+        """Track environment stastics for logging
+        """
+        self.unique_edges = []
+        self.path_graph = []
+
+        self.alpha_adj_before_trav = 0
+        self.alpha_adjustments = 0
+
+        self.acc_estimations = 0
+
+        self.edge_traversals = 0
+        self.illegal_edge_traversals = 0
 
     def reset(self):
         """Reset the environment state"""
@@ -111,6 +144,9 @@ class NasEnv(gym.Env):
         self.meta_model.load_state_dict(self.meta_state)
         self.update_states()
 
+        # tracking the environment
+        self.init_tracking_vars()
+
         # Set starting edge for agent
         self.set_start_state()
 
@@ -121,7 +157,6 @@ class NasEnv(gym.Env):
 
     def set_task(self, task, meta_state):
         """The meta-loop passes the task for the environment to solve"""
-        print("Set new task for environment")
         self.current_task = task
         self.meta_state = copy.deepcopy(meta_state)
 
@@ -229,8 +264,9 @@ class NasEnv(gym.Env):
         self.current_state = self.states[
             self.current_state_index]
 
-    # Methods to increase alphas
     def _inverse_softmax(self, x, C):
+        """Reverse calculation of the normalized alpha
+        """
         return torch.log(x) + C
 
     def increase_op(self, row_idx, edge_idx, op_idx, prob=0.3):
@@ -286,7 +322,7 @@ class NasEnv(gym.Env):
             prob -= surplus
 
         if curr_op - prob > 0.0:
-            # Increase chosen op
+            # Decrease chosen op
             with torch.no_grad():
                 curr_op -= prob
 
@@ -343,12 +379,6 @@ class NasEnv(gym.Env):
     def step(self, action):
         start = time.time()
 
-        # cur_node = int(self.current_state[0])
-        # next_node = int(self.current_state[1])
-        # row_idx, edge_idx = self.edge_to_alpha[(cur_node, next_node)]
-        # norm_a1 = F.softmax(
-        #     self.meta_model.alpha_normal[row_idx][edge_idx], dim=-1).detach().cpu()
-
         # Mutates the meta_model and the local state
         action_info, reward, acc = self._perform_action(action)
 
@@ -381,23 +411,24 @@ class NasEnv(gym.Env):
         done = self.step_count == self.max_ep_len or \
             self.terminate_episode
 
+        # TODO: Store alphas or genotype?
         info_dict = {
             "step_count": self.step_count,
             "action_id": action,
             "action": action_info,
             "acc": acc,
             "running_time": running_time,
+            "alpha_adjustments": self.alpha_adjustments,
+            "acc_estimations": self.acc_estimations,
+            "edge_traversals": self.edge_traversals,
+            "illegal_edge_traversals": self.illegal_edge_traversals,
+            "alpha_adj_before_trav": self.alpha_adj_before_trav
         }
 
-        # norm_a2 = F.softmax(
-        #     self.meta_model.alpha_normal[row_idx][edge_idx], dim=-1).detach().cpu()
-
-        # if acc is not None:
-        #     acc = round(acc, 2)
-        # print(
-        #     f"\nstep: {self.step_count}, action: {action}, {action_info}, rew: {reward:.2f}, acc: {acc}")
-        # print(['%.2f' % elem for elem in list(norm_a1)])
-        # print(['%.2f' % elem for elem in list(norm_a2)])
+        # Final episode statistics
+        if done:
+            info_dict['unique_edges'] = len(self.unique_edges)
+            info_dict['path_graph'] = self.path_graph
 
         return self.current_state, reward, done, info_dict
 
@@ -430,11 +461,33 @@ class NasEnv(gym.Env):
 
                 action_info = f"Legal move from {cur_node} to {action}"
 
-            elif self.A[next_node][action] < 1:
-                # Illegal next_node is not connected the action node
-                # return reward -1, and stay in the same edge
-                reward = -0.1
+                # Compute reward after updating
+                if self.do_update:
+                    self.acc_estimations += 1
+                    reward, acc = self.compute_reward()
+                    self.do_update = False
 
+                    if (cur_node, next_node) not in self.unique_edges:
+                        self.unique_edges.append((cur_node, next_node))
+
+                        if self.encourage_exploration:
+                            if reward > 0.0:
+                                reward = reward * self.encourage_increase
+                    else:
+                        if self.encourage_exploration:
+                            if reward > 0.0:
+                                reward = reward * self.ecnourage_decrease
+
+                # Action statistics
+                self.edge_traversals += 1
+                self.alpha_adj_before_trav = 0
+
+                self.path_graph.append((cur_node, next_node))
+
+            elif self.A[next_node][action] < 1:
+
+                # Action statistics
+                self.illegal_edge_traversals += 1
                 action_info = f"Illegal move from {cur_node} to {action}"
 
         # Increasing the alpha for the given operation
@@ -456,12 +509,14 @@ class NasEnv(gym.Env):
             if update:
                 # Update the local state after increasing the alphas
                 self.update_states()
+                self.do_update = True
 
             # Set current state again!
             self.current_state = self.states[s_idx]
 
-            # Compute reward after updating
-            reward, acc = self.compute_reward()
+            # Action statistics
+            self.alpha_adjustments += 1
+            self.alpha_adj_before_trav += 1
 
             action_info = f"Increase alpha ({row_idx}, {edge_idx}, {action})"
 
@@ -484,12 +539,14 @@ class NasEnv(gym.Env):
             if update:
                 # Update the local state after increasing the alphas
                 self.update_states()
+                self.do_update = True
 
             # Set current state again!
             self.current_state = self.states[s_idx]
 
-            # Compute reward after updating
-            reward, acc = self.compute_reward()
+            # Action statistics
+            self.alpha_adjustments += 1
+            self.alpha_adj_before_trav += 1
 
             action_info = f"Decrease alpha ({row_idx}, {edge_idx}, {action})"
 
@@ -497,30 +554,71 @@ class NasEnv(gym.Env):
         if action in np.arange(len(self.A)+2*len(self.primitives),
                                len(self.A)+2*len(self.primitives)+1,
                                ):
+
+            # Action statistics
             self.terminate_episode = True
             action_info = f"Terminate the episode at step {self.step_count}"
 
         return action_info, reward, acc
 
     def compute_reward(self):
-        # Calculation/Estimations of the reward
-        # For testing env
+        """Calculation or estimations of the reward"""
+        # Dummy acc and reward for testing purposes
         if self.test_env is not None:
-            return np.random.uniform(low=-1, high=1, size=(1,))[0]
+            acc = np.random.uniform(low=0, high=1, size=(1,))[0]
+            reward = self.scale_reward(acc)
+            return reward, acc
 
         if self.reward_estimation:
             acc = self._meta_predictor_estimation(self.current_task)
         else:
             acc = self._darts_estimation(self.current_task)
 
-        # Scale reward to (-1, 1) range
+        # 4 ideas to adjust the reward,
+        # Scale reward to (-1, 1) range, [-min, max]
         reward = self.scale_reward(acc)
+
+        # Naive +1, -1 rewards for increase and decrease respectively
+        # reward = self.naive_reward(acc)
+
+        # Smooth reward based on lunar lander
+        # reward = self.smooth_scale_penalized_reward(acc)
+
+        # Penalize reward
+        # if reward > 0.0:
+        #     reward = reward * (1-(self.step_count/self.max_ep_len))
+
         return reward, acc
 
-    def scale_reward(self, accuracy):
+    def smooth_scale_penalized_reward(self, accuracy):
+        # prev_acc = self.baseline acc
+        # prev_acc < 1.0, => self.baseline_acc - 1e-8
+        prev_acc = self.baseline_acc
+        # To prevent the reward function from being undefined
+        if self.baseline_acc == 1.0:
+            prev_acc = self.baseline_acc - 1e-8
+
+        # Reward on the improvment on accuracy with respect to the
+        # previous estimation.
+        # 1 - (1 - (acc - prev_acc)/(1- prev_acc))**0.4
+        smooth_rew = (1 - (1 - (accuracy - prev_acc)/(1 - prev_acc))**0.4)
+
+        # Clipping the reward
+        if smooth_rew < -1.0:
+            return -1.0
+
+        return smooth_rew
+
+    def naive_reward(self, accuracy):
+        if self.baseline_acc <= accuracy:
+            return -1
+        elif self.baseline_acc > accuracy:
+            return 1
+
+    def scale_reward(self, accuracy, curve=False):
         """
-        Map the accuracy of the network to [-1, 1] for
-        the environment.
+        Map the accuracy of the network to [min_rew, max_rew]
+        for the environment.
 
         Mapping the accuracy in [s1, s2] to [b1, b2]
 
@@ -529,9 +627,7 @@ class NasEnv(gym.Env):
         """
         # Map accuracies greater than the baseline to
         # [0, 1]
-        reward = 0
-
-        # print(self.baseline_acc, accuracy)
+        reward = 0.0
 
         # Else, the reward is 0
         if self.baseline_acc == accuracy:
@@ -539,20 +635,34 @@ class NasEnv(gym.Env):
 
         if self.baseline_acc <= accuracy:
             a1, a2 = self.baseline_acc, 1.0
-            b1, b2 = 0.0, 4.0
+            b1, b2 = 0.0, self.max_rew
 
             reward = b1 + ((accuracy-a1)*(b2-b1)) / (a2-a1)
+
+            # Curve up the positive rewards
+            if curve:
+                reward = 1 - (1-reward)**0.4
+
         # Map accuracies smaller than the baseline to
         # [-1, 0]
         elif self.baseline_acc >= accuracy:
             a1, a2 = 0.0, self.baseline_acc
-            b1, b2 = -0.1, 0.0
+            b1, b2 = self.min_rew, 0.0
 
             reward = b1 + ((accuracy-a1)*(b2-b1)) / (a2-a1)
 
         return reward
 
     def _darts_estimation(self, task):
+        """Train network with one step gradient descent on the training set
+        and calculate the accuracy of the test set.
+
+        Args:
+            task (Task): few-shot learning
+
+        Returns:
+            [Double]: Network Accuracy
+        """
         # First train the weights with few steps on current batch
         self.meta_model.train()
 
@@ -569,6 +679,7 @@ class NasEnv(gym.Env):
                                      self.config.w_grad_clip)
             self.w_optim.step()
 
+        # TODO: Debug discretize network before test set accuracy
         for batch_idx, batch in enumerate(task.test_loader):
             x_test, y_test = batch
             x_test = x_test.to(self.config.device, non_blocking=True)
@@ -580,11 +691,11 @@ class NasEnv(gym.Env):
 
             prec1, _ = utils.accuracy(logits, y_test, topk=(1, 5))
 
-        reward = prec1.item()
-        return reward
+        acc = prec1.item()
+        return acc
 
     def _meta_predictor_estimation(self, task):
-
+        # Encode graph and dataset
         graph = self._meta_predictor_graph_preprocess()
         dataset = self._meta_predictor_dataset_preprocess(task)
 
@@ -594,11 +705,6 @@ class NasEnv(gym.Env):
         )
 
         y_pred = y_pred.item()
-        # print(y_pred)
-
-        # x_min, x_max = -1, 1
-        # acc = (y_pred - x_min)/(x_max - x_min)
-
         return y_pred
 
     def _meta_predictor_graph_preprocess(self):
@@ -645,10 +751,11 @@ class NasEnv(gym.Env):
         # Testing dataset does not have enough samples
         train_y, _ = next(iter(task.train_loader))
         assert train_y.shape[0] == self.config.num_samples, \
-            "Number of samples should equal training of meta_predictor" \
+            "Number of samples should equal training of meta_predictor " \
             f"{train_y.shape[0]}, {self.config.num_samples}"
 
         # Shape the image as (3, 32, 32)
+        train_y = train_y.to(self.config.device)
         dataset = F.interpolate(train_y, size=(32, 32))
 
         # Make sure there are 3 channels
@@ -658,16 +765,16 @@ class NasEnv(gym.Env):
 
         # Normalize the features
         if self.config.dataset == "omniglot":
-            mean = torch.tensor([0.9221])
-            std = torch.tensor([0.1257])
+            mean = torch.tensor([0.9221]).to(self.config.device)
+            std = torch.tensor([0.1257]).to(self.config.device)
 
         elif self.config.dataset == "triplemnist":
-            mean = torch.tensor([0.0439])
-            std = torch.tensor([0.1879])
+            mean = torch.tensor([0.0439]).to(self.config.device)
+            std = torch.tensor([0.1879]).to(self.config.device)
 
         elif self.config.dataset == "miniimagenet":
-            mean = torch.tensor([0.4416])
-            std = torch.tensor([0.2328])
+            mean = torch.tensor([0.4416]).to(self.config.device)
+            std = torch.tensor([0.2328]).to(self.config.device)
         else:
             raise RuntimeError(
                 f"Dataset {self.config.dataset} is not supported.")
