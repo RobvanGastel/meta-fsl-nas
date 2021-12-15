@@ -1,11 +1,12 @@
 #!/bin/bash
 
 DATASET=$DS
-DATASET_DIR=/home/TUE/20184291/meta-fsl-nas/data
+AGENT=ppo
+DATASET_DIR=/home/rob/Git/meta-fsl-nas/data
 
 for SEED in ${SEEDS}
 do
-    TRAIN_DIR=/home/TUE/20184291/meta-fsl-nas/metanas/results/ablation/${DS}_train_power_cosine/${DS}_train_power_cosine_$SEED
+    TRAIN_DIR=/home/rob/Git/meta-fsl-nas/metanas/results/${DS}/${AGENT}_darts_scale_reward_testing/seed_$SEED
 	mkdir -p $TRAIN_DIR
 
     args=(
@@ -27,12 +28,13 @@ do
         # examples per class
         --n $N \
         # number classes
-        --k 20 \
+        --k 5 \
         # test examples per class
         --q 1 \
 
         --meta_model_prune_threshold 0.01 \
         --alpha_prune_threshold 0.01 \
+
         # Meta Learning
         --meta_model searchcnn \
         --meta_epochs $EPOCHS \
@@ -41,7 +43,7 @@ do
 
         --eval_freq $EVAL_FREQ \
         --eval_epochs 50 \
-        --print_freq 100 \
+        --print_freq 5 \
 
         --normalizer softmax \
         --normalizer_temp_anneal_mode linear \
@@ -57,8 +59,22 @@ do
         --use_first_order_darts \
         --use_torchmeta_loader \
 
-        # sharpDARTS
-        --use_cosine_power_annealing \
+        # DARTS training adjustments
+        --primitives_type nasbench201 \
+        --dropout_skip_connections \
+
+        # Default M=2,
+        --use_limit_skip_connection \
+
+        # meta-RL optimization
+        # Warm-up pre-trained,
+        # --model_path ${MODEL_PATH} \
+
+        --agent ${AGENT} \
+        --agent_hidden_size 256 \
+
+        --rew_model_path /home/rob/Git/meta_predictor/predictor_max_corr.pt \
+        # --use_rew_estimation
     )
 
     python -u -m metanas.metanas_main "${args[@]}"

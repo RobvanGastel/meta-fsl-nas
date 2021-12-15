@@ -7,11 +7,11 @@
 # tensorboard --logdir=/home/rob/Git/meta-fsl-nas/metanas/results/agent
 
 # parameters
-EPOCHS=200
+EPOCHS=50
 WARM_UP_EPOCHS=0
 SEEDS=(2)
 SEEDS_TWO=(1)
-EVAL_FREQ=50
+EVAL_FREQ=25
 N=3
 DS=triplemnist
 
@@ -21,4 +21,7 @@ echo "Start run of ablation studies, variables epochs = ${EPOCHS}, warm up varia
 # EPOCHS=$EPOCHS WARM_UP=$WARM_UP_EPOCHS SEEDS=${SEEDS[@]} DS=$DS N=$N EVAL_FREQ=$EVAL_FREQ ./scripts/agent/run_agent_baseline.sh
 
 # SAC
-EPOCHS=$EPOCHS WARM_UP=$WARM_UP_EPOCHS SEEDS=${SEEDS[@]} DS=$DS N=$N EVAL_FREQ=$EVAL_FREQ ./scripts/agent/run_agent_sac.sh
+# EPOCHS=$EPOCHS WARM_UP=$WARM_UP_EPOCHS SEEDS=${SEEDS[@]} DS=$DS N=$N EVAL_FREQ=$EVAL_FREQ ./scripts/agent/run_agent_sac.sh
+
+# PPO
+EPOCHS=$EPOCHS WARM_UP=$WARM_UP_EPOCHS SEEDS=${SEEDS[@]} DS=$DS N=$N EVAL_FREQ=$EVAL_FREQ ./scripts/agent/run_agent_ppo.sh
