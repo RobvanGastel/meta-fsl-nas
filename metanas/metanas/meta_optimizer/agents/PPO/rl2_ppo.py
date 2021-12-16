@@ -574,6 +574,10 @@ class PPO(RL_agent):
             self.logger.store(
                 Acc=info_dict['acc']
             )
+        if 'test_acc' in info_dict:
+            self.logger.store(
+                TestAcc=info_dict['test_acc']
+            )
 
         # Log graph walk information
         self.logger.store(
@@ -611,6 +615,7 @@ class PPO(RL_agent):
             ],
             'Environment': [
                 'NumAlphaAdj', 'NumEstimations', 'Acc',
+                'TestAcc',
                 'NumEdgeTrav', 'NumIllegalEdgeTrav',
                 'NumAlphaAdjBeforeTrav', 'UniqueEdges'
             ],
@@ -644,6 +649,8 @@ class PPO(RL_agent):
         # Ignore this metric for non-NAS environments
         self.logger.log_tabular(
             'Acc', average_only=True, with_min_and_max=True)
+        self.logger.log_tabular(
+            'TestAcc', average_only=True, with_min_and_max=True)
         # self.logger.log_tabular('EpMaxAcc', with_min_and_max=True)
         self.logger.log_tabular('VVals', with_min_and_max=True)
         self.logger.log_tabular('TotalEnvInteracts',
