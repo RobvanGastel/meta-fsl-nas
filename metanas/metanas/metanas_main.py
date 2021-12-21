@@ -231,7 +231,7 @@ def _init_meta_rl_agent(config, meta_model):
                     epochs=config.agent_trials_per_mdp,  # 1 trial
                     hidden_size=config.agent_hidden_size,
                     count_trajectories=True,
-                    number_of_trajectories=50,
+                    number_of_trajectories=config.number_of_trajectories,
                     exploration_sampling=True)
 
     else:
@@ -549,29 +549,28 @@ def train(
             # Now optimize alphas for better initialization
             meta_rl_agent.train_agent(env_normal)
             meta_rl_agent.train_agent(env_reduce)
+            # task_info = meta_rl_agent.train_agent(env_reduce)
 
-            # In warm-up don't change the alphas
-            if meta_epoch <= config.warm_up_epochs:
-                meta_model.load_state_dict(meta_state)
-            else:
-                # Obtain better meta_model state for task-learning
-                # and set.
-                normal_alphas = env_normal.get_max_alphas()
-                reduce_alphas = env_reduce.get_max_alphas()
+            # Obtain better meta_model state for task-learning
+            # and set.
+            normal_alphas = env_normal.get_max_meta_model()
+            reduce_alphas = env_reduce.get_max_meta_model()
 
-                meta_model.alpha_normal = nn.ParameterList()
-                meta_model.alpha_reduce = nn.ParameterList()
+            meta_model.alpha_normal = nn.ParameterList()
+            meta_model.alpha_reduce = nn.ParameterList()
 
-                for n_alpha, r_alpha in zip(normal_alphas, reduce_alphas):
-                    meta_model.alpha_normal.append(nn.Parameter(n_alpha))
-                    meta_model.alpha_reduce.append(nn.Parameter(r_alpha))
+            for n_alpha, r_alpha in zip(normal_alphas, reduce_alphas):
+                meta_model.alpha_normal.append(nn.Parameter(n_alpha))
+                meta_model.alpha_reduce.append(nn.Parameter(r_alpha))
 
-            task_infos += [
-                task_optimizer.step(
-                    task, epoch=meta_epoch,
-                    global_progress=global_progress
-                )
-            ]
+            # task_infos += [
+            #     task_info
+            # ]
+
+            task_optimizer.step(
+                task, epoch=meta_epoch,
+                global_progress=global_progress
+            )
             meta_model.load_state_dict(meta_state)
 
         time_be = time.time()
@@ -608,7 +607,8 @@ def train(
 
         # meta testing every config.eval_freq epochs
         # meta test eval + backup
-        if meta_epoch % config.eval_freq == 0:
+        if False:
+            # if meta_epoch % config.eval_freq == 0:
             meta_test_batch = task_distribution.sample_meta_test()
 
             # Each task starts with the current meta state
@@ -1166,6 +1166,10 @@ if __name__ == "__main__":
     parser.add_argument("--agent_update_every",
                         type=int,
                         default=1000)
+
+    parser.add_argument("--darts_estimation_steps",
+                        type=int, default=7)
+    # config.darts_estimation_steps = 7
 
     # MetaD2A settings
     # reward estimation for the RL environment

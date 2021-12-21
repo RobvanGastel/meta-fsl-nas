@@ -130,8 +130,16 @@ def set_hyperparameter(config):
 def set_rl_hyperparameters(config):
     config.logger_kwargs = setup_logger_kwargs(config.path,
                                                seed=config.seed)
-    config.agent_steps_per_trial = 500
+    config.number_of_trajectories = 30
     config.num_test_episodes = 3
+
+    # DARTS estimation config
+    # config.darts_estimation_steps = 7
+    config.update_weights_and_alphas = True
+
+    # Configure reward range
+    config.max_rew = 2.0
+    config.min_rew = -0.10
 
     # Graph walk logging
     config.graph_walk_index = config.start_epoch

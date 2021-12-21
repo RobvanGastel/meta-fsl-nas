@@ -7,10 +7,9 @@
 # tensorboard --logdir=/home/rob/Git/meta-fsl-nas/metanas/results/agent
 
 # parameters
-EPOCHS=50
+EPOCHS=100
 WARM_UP_EPOCHS=0
 SEEDS=(2)
-SEEDS_TWO=(1)
 EVAL_FREQ=25
 N=3
 DS=triplemnist

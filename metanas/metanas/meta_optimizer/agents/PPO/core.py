@@ -50,6 +50,35 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     return layer
 
 
+# Source, https://boring-guy.sh/posts/masking-rl/
+class MaskedCategorical(Categorical):
+
+    def __init__(self, logits, mask=None):
+        self.mask = mask
+        if mask is None:
+            super(MaskedCategorical, self).__init__(logits=logits)
+        else:
+            self.mask_value = torch.finfo(logits.dtype).min
+            logits.masked_fill_(~self.mask, self.mask_value)
+            super(MaskedCategorical, self).__init__(logits=logits)
+
+    def entropy(self):
+        if self.mask is None:
+            return super().entropy()
+        p_log_p = self.logits * self.probs
+        p_log_p = torch.where(self.mask, p_log_p,
+                              torch.tensor(0.).to(p_log_p.device))
+        return -p_log_p.sum(-1)
+
+    def log_prob(self, action):
+        if self.mask is None:
+            return super().log_prob(action)
+
+        log_prob = super().log_prob(action)
+        # print(action, log_prob, self.mask)
+        return log_prob
+
+
 class MLPCritic(nn.Module):
 
     def __init__(self, obs_dim, hidden_sizes, activation):
@@ -145,7 +174,7 @@ class ActorCritic(nn.Module):
     def _one_hot(self, act):
         return torch.eye(self.act_dim)[act.long(), :].to(self.device)
 
-    def pi(self, obs, prev_act, prev_rew, hid_in, action=None,
+    def pi(self, obs, prev_act, prev_rew, hid_in, mask, action=None,
            training=False):
 
         # previous action one-hot encoding: (batch_size, act_dim)
@@ -172,7 +201,9 @@ class ActorCritic(nn.Module):
             gru_out = gru_out.squeeze(1)
 
         logits = self.linear_pi(gru_out)
-        pi = Categorical(logits=logits)
+
+        # Action masking
+        pi = MaskedCategorical(logits=logits, mask=mask)
 
         logp_a = None
         if action is not None:
@@ -220,10 +251,11 @@ class ActorCritic(nn.Module):
         v = self.linear_v(gru_out).reshape(-1)
         return v
 
-    def step(self, obs, prev_act, prev_rew, hid_in):
+    def step(self, obs, prev_act, prev_rew, hid_in, mask):
         with torch.no_grad():
             # distribution
-            pi, hid_out, _ = self.pi(obs, prev_act, prev_rew, hid_in)
+
+            pi, hid_out, _ = self.pi(obs, prev_act, prev_rew, hid_in, mask)
             a = pi.sample()
 
             # Log_prob of action a
@@ -232,6 +264,6 @@ class ActorCritic(nn.Module):
 
         return a.cpu().numpy(), v.cpu().numpy(), logp_a.cpu().numpy(), hid_out
 
-    def act(self, obs, prev_act, prev_rew, hid_in):
-        a, _, _, hid_out = self.step(obs, prev_act, prev_rew, hid_in)
+    def act(self, obs, prev_act, prev_rew, hid_in, mask):
+        a, _, _, hid_out = self.step(obs, prev_act, prev_rew, hid_in, mask)
         return a, hid_out

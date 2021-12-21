@@ -21,7 +21,7 @@ class RolloutBuffer:
     (GAE-Lambda) for calculating the advantages of state-action pairs.
     """
 
-    def __init__(self, obs_dim, act_dim, size, hidden_size, device,
+    def __init__(self, obs_dim, act_dim, size, hidden_size, device, mask_dim,
                  use_exploration_sampling=False, gamma=0.99, lam=0.95):
 
         # Pick sampling episodes or time-steps
@@ -37,6 +37,9 @@ class RolloutBuffer:
             combined_shape(size, obs_dim), dtype=np.float32)
         self.act_buf = np.zeros(
             combined_shape(size, act_dim), dtype=np.float32)
+
+        # 14
+        self.mask_buf = np.zeros((size, mask_dim), dtype=np.float32)
 
         self.adv_buf = np.zeros(size, dtype=np.float32)
         self.rew_buf = np.zeros(size, dtype=np.float32)
@@ -54,7 +57,7 @@ class RolloutBuffer:
         self.gamma, self.lam = gamma, lam
         self.ptr, self.path_start_idx, self.max_size = 0, 0, size
 
-    def store(self, obs, act, rew, logp, val, prev_act, prev_rew, hidden):
+    def store(self, obs, act, rew, logp, val, prev_act, prev_rew, hidden, mask):
         """
         Append one timestep of agent-environment interaction to the buffer.
         """
@@ -65,6 +68,9 @@ class RolloutBuffer:
         self.rew_buf[self.ptr] = rew
         self.val_buf[self.ptr] = val
         self.logp_buf[self.ptr] = logp
+
+        # Mask
+        self.mask_buf[self.ptr] = mask
 
         self.hxs_buf[self.ptr] = hidden
         self.prev_act_buf[self.ptr] = prev_act
@@ -106,6 +112,7 @@ class RolloutBuffer:
             path_slice].mean()) / (self.adv_buf[path_slice].std() + 1e-8)
 
         data = dict(obs=self.obs_buf[path_slice],
+                    mask=self.mask_buf[path_slice],
                     act=self.act_buf[path_slice],
                     adv=self.adv_buf[path_slice],
                     ret=self.ret_buf[path_slice],
@@ -140,6 +147,7 @@ class RolloutBuffer:
                         act=self.act_buf[path_slice],
                         adv=np.array(adv_buf, copy=True),
                         ret=np.array(ret_buf, copy=True),
+                        mask=self.mask_buf[path_slice],
                         logp=self.logp_buf[path_slice],
                         val=self.val_buf[path_slice],
                         prev_act=self.prev_act_buf[path_slice],
@@ -195,6 +203,7 @@ class RolloutBuffer:
         self.adv_buf = np.zeros_like(self.adv_buf)
         self.rew_buf = np.zeros_like(self.rew_buf)
         self.ret_buf = np.zeros_like(self.ret_buf)
+        self.mask_buf = np.zeros_like(self.mask_buf)
         self.val_buf = np.zeros_like(self.val_buf)
         self.logp_buf = np.zeros_like(self.logp_buf)
         self.prev_act_buf = np.zeros_like(self.prev_act_buf)
@@ -260,11 +269,11 @@ class PPO(RL_agent):
 
         self.storage = RolloutBuffer(
             obs_dim, act_dim, self.steps_per_epoch,
-            hidden_size, self.device,
+            hidden_size, self.device, env.action_space.n,
             use_exploration_sampling=exploration_sampling,
             gamma=gamma, lam=lam)
 
-    def get_action(self, obs, prev_act, prev_rew, hid):
+    def get_action(self, obs, prev_act, prev_rew, hid, mask):
 
         # obs shape: [1, obs_dim]
         obs = torch.as_tensor(
@@ -282,18 +291,24 @@ class PPO(RL_agent):
             [prev_rew], dtype=torch.float32
         ).to(self.device).unsqueeze(0)
 
-        return self.ac.step(obs, prev_act, prev_rew, hid)
+        # Mask the illegal transitions
+        mask = torch.tensor(mask, dtype=torch.bool).to(self.device)
+
+        return self.ac.step(obs, prev_act, prev_rew, hid, mask)
 
     def compute_loss(self, batch):
         obs, act, adv = batch['obs'], batch['act'], batch['adv']
         ret, logp_old = batch['ret'], batch['logp']
+        mask = batch['mask']
+
+        mask = torch.as_tensor(mask, dtype=torch.bool).to(self.device)
 
         # RL^2 variables
         prev_act, prev_rew = batch['prev_act'], batch['prev_rew'].view(-1, 1)
         h = batch['hidden'].view(1, -1, self.hidden_size)
 
         pi, _, logp = self.ac.pi(
-            obs, prev_act, prev_rew, h, act, training=True)
+            obs, prev_act, prev_rew, h, mask, act, training=True)
 
         # Policy loss
         ratio = torch.exp(logp - logp_old)
@@ -307,6 +322,10 @@ class PPO(RL_agent):
              )**2).mean()
 
         # Useful extra info
+        # Filter out masked log probs
+        logp_old = (logp_old > -1e30) * logp_old
+        logp = (logp > -1e30) * logp
+
         approx_kl = (logp_old - logp).mean().item()
         ent = pi.entropy().mean().item()
         clipped = ratio.gt(1+self.clip_ratio) | ratio.lt(1-self.clip_ratio)
@@ -383,14 +402,15 @@ class PPO(RL_agent):
             # To sample k trajectories
             for tr in range(self.number_of_trajectories):
                 d, ep_ret, ep_len = False, 0, 0
-                o = self.env.reset()
+                o, mask = self.env.reset()
 
                 while not(d or (ep_len == self.max_ep_len)):
                     # Keeping track of current hidden states
                     h_in = h_out
 
-                    a, v, logp_a, h_out = self.get_action(o, a2, r2, h_in)
-                    next_o, r, d, info_dict = self.env.step(a[0])
+                    a, v, logp_a, h_out = self.get_action(
+                        o, a2, r2, h_in, mask)
+                    next_o, r, d, info_dict, mask = self.env.step(a[0])
                     ep_ret += r
                     ep_len += 1
 
@@ -400,7 +420,7 @@ class PPO(RL_agent):
 
                     # save and log
                     self.storage.store(o, a, r, logp_a, v, a2,
-                                       r2, h_in.cpu().numpy())
+                                       r2, h_in.cpu().numpy(), mask)
                     self.logger.store(VVals=v)
 
                     # Set the previous reward and action
@@ -417,7 +437,7 @@ class PPO(RL_agent):
 
                 # End of trajectory handling
                 if timeout:
-                    _, v, _, _ = self.get_action(o, a2, r2, h_out)
+                    _, v, _, _ = self.get_action(o, a2, r2, h_out, mask)
                 else:
                     v = 0
                 self.storage.finish_path(v)
@@ -435,10 +455,15 @@ class PPO(RL_agent):
 
             self.current_epoch += 1
 
-            self._log_trial(self.current_epoch, start_time)
+        # Calculate final test reward, at the end of the episode
+        task_info = self.env._darts_evaluate_test_set()
+        self.logger.store(TestAcc=task_info.top1)
+
+        self._log_trial(self.current_epoch, start_time)
 
         # Write graph walks
         self._log_graph_walks()
+        return task_info
 
     def train_step_agent(self, env):
         assert env is not None, "Pass a task for the current trial"
@@ -446,7 +471,7 @@ class PPO(RL_agent):
         # Prepare for interaction with environment
         self.env = env
         start_time = time.time()
-        o, ep_ret, ep_len = self.env.reset(), 0, 0
+        o, mask, ep_ret, ep_len = self.env.reset(), 0, 0
 
         # RL^2 variables
         h_in = torch.zeros([1, 1, self.hidden_size]).to(self.device)
@@ -460,9 +485,9 @@ class PPO(RL_agent):
                 # Keeping track of current hidden states
                 h_in = h_out
 
-                a, v, logp_a, h_out = self.get_action(o, a2, r2, h_in)
+                a, v, logp_a, h_out = self.get_action(o, a2, r2, h_in, mask)
 
-                next_o, r, d, info_dict = self.env.step(a)
+                next_o, r, d, info_dict, mask = self.env.step(a)
                 ep_ret += r
                 ep_len += 1
 
@@ -472,7 +497,7 @@ class PPO(RL_agent):
 
                 # save and log
                 self.storage.store(o, a, r, logp_a, v, a2,
-                                   r2, h_in.cpu().numpy())
+                                   r2, h_in.cpu().numpy(), mask)
                 self.logger.store(VVals=v)
 
                 # Set the previous reward and action
@@ -501,7 +526,7 @@ class PPO(RL_agent):
                     # if trajectory didn't reach terminal state, bootstrap
                     # value target
                     if timeout or epoch_ended:
-                        _, v, _, _ = self.get_action(o, a2, r2, h_out)
+                        _, v, _, _ = self.get_action(o, a2, r2, h_out, mask)
                     else:
                         v = 0
 
@@ -510,7 +535,7 @@ class PPO(RL_agent):
                     if terminal:
                         # only save EpRet / EpLen if trajectory finished
                         self.logger.store(EpRet=ep_ret, EpLen=ep_len)
-                    o, ep_ret, ep_len = self.env.reset(), 0, 0
+                    o, mask, ep_ret, ep_len = self.env.reset(), 0, 0
 
                 # Increase global steps for the next trial
                 self.global_steps += 1
@@ -574,32 +599,41 @@ class PPO(RL_agent):
             self.logger.store(
                 Acc=info_dict['acc']
             )
-        if 'test_acc' in info_dict:
-            self.logger.store(
-                TestAcc=info_dict['test_acc']
-            )
 
         # Log graph walk information
         self.logger.store(
-            NumAlphaAdj=info_dict[
-                'alpha_adjustments'])
-        self.logger.store(
-            NumEstimations=info_dict[
-                'acc_estimations'])
-        self.logger.store(
-            NumEdgeTrav=info_dict[
-                'edge_traversals'])
-        self.logger.store(
             NumIllegalEdgeTrav=info_dict[
                 'illegal_edge_traversals'])
-        self.logger.store(
-            NumAlphaAdjBeforeTrav=info_dict[
-                'alpha_adj_before_trav'])
 
         # End of episode logging
         if 'unique_edges' in info_dict:
             self.logger.store(
                 UniqueEdges=info_dict['unique_edges']
+            )
+
+        if 'alpha_adjustments' in info_dict:
+            self.logger.store(
+                NumAlphaAdj=info_dict[
+                    'alpha_adjustments'])
+
+        if 'edge_traversals' in info_dict:
+            self.logger.store(
+                NumEdgeTrav=info_dict[
+                    'edge_traversals'])
+
+        if 'alpha_adj_before_trav' in info_dict:
+            self.logger.store(
+                NumAlphaAdjBeforeTrav=info_dict[
+                    'alpha_adj_before_trav'])
+
+        if 'acc_estimations' in info_dict:
+            self.logger.store(
+                NumEstimations=info_dict[
+                    'acc_estimations'])
+
+        if 'test_acc' in info_dict:
+            self.logger.store(
+                TestAcc=info_dict['test_acc']
             )
 
         # Graph walk logging
@@ -608,75 +642,79 @@ class PPO(RL_agent):
 
     def _log_trial(self, epoch, start_time):
         # Log to tensorboard
-        log_board = {
-            'Performance': [
-                'EpRet', 'EpLen', 'VVals', 'Entropy',
-                'KL', 'ClipFrac', 'Time'
-            ],
-            'Environment': [
-                'NumAlphaAdj', 'NumEstimations', 'Acc',
-                'TestAcc',
-                'NumEdgeTrav', 'NumIllegalEdgeTrav',
-                'NumAlphaAdjBeforeTrav', 'UniqueEdges'
-            ],
-            'Loss': ['LossPi', 'LossV', 'Loss',
-                     'DeltaLossPi', 'DeltaLossV',
-                     'DeltaLoss'
-                     ]}
 
-        for key, value in log_board.items():
-            for val in value:
-                if val is not "Time":
-                    mean, std = self.logger.get_stats(val)
-                if key == 'Performance' or key == "Environment":
-                    if val == 'Time':
-                        self.summary_writer.add_scalar(
-                            key+'/Time', time.time()-start_time,
-                            self.global_steps)
+        try:
+            log_board = {
+                'Performance': [
+                    'EpRet', 'EpLen', 'VVals', 'Entropy',
+                    'KL', 'ClipFrac', 'Time'
+                ],
+                'Environment': [
+                    'NumAlphaAdj', 'NumEstimations', 'Acc',
+                    'TestAcc',
+                    'NumEdgeTrav', 'NumIllegalEdgeTrav',
+                    'NumAlphaAdjBeforeTrav', 'UniqueEdges'
+                ],
+                'Loss': ['LossPi', 'LossV', 'Loss',
+                         'DeltaLossPi', 'DeltaLossV',
+                         'DeltaLoss'
+                         ]}
+
+            for key, value in log_board.items():
+                for val in value:
+                    if val is not "Time":
+                        mean, std = self.logger.get_stats(val)
+                    if key == 'Performance' or key == "Environment":
+                        if val == 'Time':
+                            self.summary_writer.add_scalar(
+                                key+'/Time', time.time()-start_time,
+                                self.global_steps)
+                        else:
+                            self.summary_writer.add_scalar(
+                                key+'/Average'+val, mean, self.global_steps)
+                            self.summary_writer.add_scalar(
+                                key+'/Std'+val, std, self.global_steps)
                     else:
                         self.summary_writer.add_scalar(
-                            key+'/Average'+val, mean, self.global_steps)
-                        self.summary_writer.add_scalar(
-                            key+'/Std'+val, std, self.global_steps)
-                else:
-                    self.summary_writer.add_scalar(
-                        key+'/'+val, mean, self.global_steps)
+                            key+'/'+val, mean, self.global_steps)
 
-        # Log to console with SpinningUp logger
-        self.logger.log_tabular('Epoch', epoch)
-        self.logger.log_tabular('EpRet', with_min_and_max=True)
-        self.logger.log_tabular('EpLen', average_only=True)
-        # Ignore this metric for non-NAS environments
-        self.logger.log_tabular(
-            'Acc', average_only=True, with_min_and_max=True)
-        self.logger.log_tabular(
-            'TestAcc', average_only=True, with_min_and_max=True)
-        # self.logger.log_tabular('EpMaxAcc', with_min_and_max=True)
-        self.logger.log_tabular('VVals', with_min_and_max=True)
-        self.logger.log_tabular('TotalEnvInteracts',
-                                self.global_steps)
-        self.logger.log_tabular('LossPi', average_only=True)
-        self.logger.log_tabular('LossV', average_only=True)
-        self.logger.log_tabular('Loss', average_only=True)
-        self.logger.log_tabular('DeltaLossPi', average_only=True)
-        self.logger.log_tabular('DeltaLossV', average_only=True)
-        self.logger.log_tabular('DeltaLoss', average_only=True)
-        self.logger.log_tabular('Entropy', average_only=True)
-        self.logger.log_tabular('KL', average_only=True)
+            # Log to console with SpinningUp logger
+            self.logger.log_tabular('Epoch', epoch)
+            self.logger.log_tabular('EpRet', with_min_and_max=True)
+            self.logger.log_tabular('EpLen', average_only=True)
+            # Ignore this metric for non-NAS environments
+            self.logger.log_tabular(
+                'Acc', average_only=True, with_min_and_max=True)
+            self.logger.log_tabular(
+                'TestAcc', average_only=True, with_min_and_max=True)
+            # self.logger.log_tabular('EpMaxAcc', with_min_and_max=True)
+            self.logger.log_tabular('VVals', with_min_and_max=True)
+            self.logger.log_tabular('TotalEnvInteracts',
+                                    self.global_steps)
+            self.logger.log_tabular('LossPi', average_only=True)
+            self.logger.log_tabular('LossV', average_only=True)
+            self.logger.log_tabular('Loss', average_only=True)
+            self.logger.log_tabular('DeltaLossPi', average_only=True)
+            self.logger.log_tabular('DeltaLossV', average_only=True)
+            self.logger.log_tabular('DeltaLoss', average_only=True)
+            self.logger.log_tabular('Entropy', average_only=True)
+            self.logger.log_tabular('KL', average_only=True)
 
-        self.logger.log_tabular('NumAlphaAdj', average_only=True)
-        self.logger.log_tabular('NumEstimations', average_only=True)
-        self.logger.log_tabular('NumEdgeTrav', average_only=True)
-        self.logger.log_tabular(
-            'NumIllegalEdgeTrav', average_only=True)
-        self.logger.log_tabular(
-            'NumAlphaAdjBeforeTrav', average_only=True)
-        self.logger.log_tabular(
-            'UniqueEdges', average_only=True)
+            self.logger.log_tabular('NumAlphaAdj', average_only=True)
+            self.logger.log_tabular('NumEstimations', average_only=True)
+            self.logger.log_tabular('NumEdgeTrav', average_only=True)
+            self.logger.log_tabular(
+                'NumIllegalEdgeTrav', average_only=True)
+            self.logger.log_tabular(
+                'NumAlphaAdjBeforeTrav', average_only=True)
+            self.logger.log_tabular(
+                'UniqueEdges', average_only=True)
 
-        self.logger.log_tabular('ClipFrac', average_only=True)
-        self.logger.log_tabular('Time', time.time()-start_time)
-        self.logger.dump_tabular()
+            self.logger.log_tabular('ClipFrac', average_only=True)
+            self.logger.log_tabular('Time', time.time()-start_time)
+            self.logger.dump_tabular()
+        except:
+            pass
 
     # def _log_test_trial(self, t, start_time):
     #     pass

@@ -56,7 +56,6 @@ class NasEnv(gym.Env):
 
         # Task acuracy estimator
         self.reward_estimation = reward_estimation
-        self.max_task_train_steps = config.darts_estimation_steps
         if self.reward_estimation:
             self.meta_predictor = MetaPredictor(config)
 
@@ -185,7 +184,7 @@ class NasEnv(gym.Env):
 
         # Set alphas and weights of the model
         self.meta_model.load_state_dict(self.meta_state)
-        self.update_states()
+        self.update_states(set_start_state=True)
 
         if not self.reward_estimation:
             self._init_darts_training()
@@ -194,14 +193,14 @@ class NasEnv(gym.Env):
         self.init_tracking_vars()
 
         # Set starting edge for agent
-        self.set_start_state()
+        # self.set_start_state()
 
         # Set baseline accuracy to scale the reward
         _, self.baseline_acc = self.compute_reward()
 
         # Invalid action mask
         mask = self.invalid_mask[self.current_state_index]
-        return self.current_state, mask
+        return self.states.flatten(), mask
 
     def set_task(self, task, meta_state):
         """The meta-loop passes the task for the environment to solve"""
@@ -228,17 +227,17 @@ class NasEnv(gym.Env):
 
     def initialize_observation_space(self):
         # Generate the internal states of the graph
-        self.update_states()
+        self.update_states(set_start_state=True)
 
         # Set starting edge for agent
-        self.set_start_state()
+        # self.set_start_state()
 
         self.observation_space = spaces.Box(
             0, self.n_nodes,
-            shape=self.current_state.shape,
+            shape=self.states.flatten().shape,
             dtype=np.int32)
 
-    def update_states(self):
+    def update_states(self, set_start_state=False):
         """Set all the state variables for the environment on
         reset and updates.
 
@@ -280,6 +279,18 @@ class NasEnv(gym.Env):
         else:
             raise RuntimeError(f"Cell type {self.cell_type} is not supported.")
 
+        for i, edge in enumerate(self.normalized_alphas):
+            for j, _ in enumerate(edge):
+                self.edge_to_index[(j, i+2)] = s_idx
+                self.edge_to_index[(i+2, j)] = s_idx+1
+
+        if set_start_state:
+            idx = np.random.choice(range(len(self.encourage_edges)))
+            cur_node, next_node = list(self.encourage_edges.keys())[idx]
+
+            self.current_state_index = self.edge_to_index[(
+                cur_node, next_node)]
+
         for i, edges in enumerate(self.normalized_alphas):
 
             # edges: Tensor(n_edges, n_ops)
@@ -292,8 +303,8 @@ class NasEnv(gym.Env):
                 hot_e[op.item()] = 1
 
             for j, edge in enumerate(edge_one_hot):
-                self.edge_to_index[(j, i+2)] = s_idx
-                self.edge_to_index[(i+2, j)] = s_idx+1
+                # self.edge_to_index[(j, i+2)] = s_idx
+                # self.edge_to_index[(i+2, j)] = s_idx+1
 
                 self.edge_to_alpha[(j, i+2)] = (i, j)
                 self.edge_to_alpha[(i+2, j)] = (i, j)
@@ -305,6 +316,7 @@ class NasEnv(gym.Env):
                 # For undirected edge we add the edge twice
                 self.states.append(
                     np.concatenate((
+                        [int(s_idx == self.current_state_index)],
                         [j],
                         [i+2],
                         [int(j in topk_edge_indices)],
@@ -316,6 +328,7 @@ class NasEnv(gym.Env):
 
                 self.states.append(
                     np.concatenate((
+                        [int(s_idx+1 == self.current_state_index)],
                         [i+2],
                         [j],
                         [int(j in topk_edge_indices)],
@@ -326,6 +339,8 @@ class NasEnv(gym.Env):
                     np.hstack((self.A[j], np.ones((self.n_ops*2)))))
 
                 s_idx += 2
+
+        self.current_state = self.states[self.current_state_index]
 
         # previous values dict
         prev_dict = {
@@ -341,17 +356,18 @@ class NasEnv(gym.Env):
 
     def set_start_state(self):
         # TODO: Random start or fixed starting point
-        idx = np.random.choice(range(len(self.encourage_edges)))
-        cur_node, next_node = list(self.encourage_edges.keys())[idx]
+        # idx = np.random.choice(range(len(self.encourage_edges)))
+        # cur_node, next_node = list(self.encourage_edges.keys())[idx]
 
-        s_idx = self.edge_to_index[(cur_node, next_node)]
-        self.current_state_index = s_idx
-        self.current_state = self.states[s_idx]
+        # s_idx = self.edge_to_index[(cur_node, next_node)]
+        # self.current_state_index = s_idx
+        # self.current_state = self.states[s_idx]
 
         # Fixed starting point
         # self.current_state_index = 0
         # self.current_state = self.states[
         #     self.current_state_index]
+        pass
 
     def _inverse_softmax(self, x, C):
         """Reverse calculation of the normalized alpha
@@ -533,7 +549,7 @@ class NasEnv(gym.Env):
             info_dict['unique_edges'] = number_of_unique_visits(
                 self.unique_edges)
 
-        return self.current_state, reward, done, info_dict, mask
+        return self.states.flatten(), reward, done, info_dict, mask
 
     def close(self):
         return NotImplemented
@@ -546,8 +562,8 @@ class NasEnv(gym.Env):
         acc = None
 
         # denotes the current edge it is on
-        cur_node = int(self.current_state[0])
-        next_node = int(self.current_state[1])
+        cur_node = int(self.current_state[1])
+        next_node = int(self.current_state[2])
 
         # Adjacancy matrix A, navigating to the next node
         if action in np.arange(len(self.A)):
@@ -602,15 +618,14 @@ class NasEnv(gym.Env):
                         # for i in [self.encourage_decrease]*multiplier:
                         #     enc_mult *= i
 
-                        # if self.encourage_exploration:
-                        #     if reward > 0.0:
-                        #         # Decrease reward
-                        #         reward = reward * \
-                        #             (self.encourage_decrease)
+                        if self.encourage_exploration:
+                            if reward > 0.0:
+                                # Decrease reward
+                                reward = reward * \
+                                    (self.encourage_decrease)
 
-                        # * enc_mult
+                                # * enc_mult
 
-                # TODO: States might change due to reward estimation
                 self.update_states()
 
                 # Action statistics
@@ -725,7 +740,6 @@ class NasEnv(gym.Env):
                 acc = self._darts_weight_alpha_estimation(self.current_task)
             else:
                 acc = self._darts_weight_estimation(self.current_task)
-
         # Scale reward to (min_rew, max_rew) range, [-min, max]
         reward = self.scale_reward(acc)
 
@@ -811,7 +825,7 @@ class NasEnv(gym.Env):
         if self.model_has_normalizer:
             self.meta_model.normalizer["params"]["curr_step"] = 0.0
             self.meta_model.normalizer["params"]["max_steps"] = float(
-                arch_adap_steps+1)
+                arch_adap_steps)
 
         if self.config.drop_path_prob > 0.0:
             # do drop path if not test phase (=in train phase) or if also use
@@ -938,8 +952,11 @@ class NasEnv(gym.Env):
     def _darts_evaluate_test_set(self):
         """Final evaluation over the test set
         """
+
+        print(self.meta_model)
         # Set max_meta_model weights
         self.meta_model.load_state_dict(self.max_meta_model)
+        self.meta_model.normalizer["params"]["curr_step"] = 0
 
         # for test data evaluation, turn off drop path
         if self.config.drop_path_prob > 0.0:
@@ -1144,9 +1161,12 @@ def parse(alpha, k, primitives=gt.PRIMITIVES_NAS_BENCH_201):
 
 
 def edge_become_topk(prev_dict, states, alphas, s_idx):
-    prev_topk = prev_dict['prev_states'][:, 2]
+    prev_topk = np.ravel(prev_dict['prev_states'][:, 3:4])
     prev_alphas = prev_dict['prev_alphas']
-    topk = states[:, 2]
+    topk = np.ravel(states[:, 3:4])
+
+    # topk[s_idx]
+    # print(topk[s_idx])
 
     if topk[s_idx] > 0.0:
         # If true, the edge became topk, calculate reward
