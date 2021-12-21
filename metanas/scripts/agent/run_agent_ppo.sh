@@ -3,14 +3,14 @@
 DATASET=$DS
 AGENT=ppo
 # DATASET_DIR=/home/rob/Git/meta-fsl-nas/data
-DATASET_DIR=/home/TUE/20184291/Git/meta-fsl-nas/data
+DATASET_DIR=/home/TUE/20184291/meta-fsl-nas/data
 
 
 
 for SEED in ${SEEDS}
 do
     # TRAIN_DIR=/home/rob/Git/meta-fsl-nas/metanas/results/${DS}/${AGENT}_metad2a_environment_2/seed_$SEED
-	TRAIN_DIR=/home/TUE/20184291/Git/meta-fsl-nas/metanas/results/${DS}/${AGENT}_metad2a_environment_2/seed_$SEED
+	TRAIN_DIR=/home/TUE/20184291/meta-fsl-nas/metanas/results/${DS}/${AGENT}_metad2a_environment_2/seed_$SEED
 
     mkdir -p $TRAIN_DIR
 
@@ -79,7 +79,8 @@ do
         --agent_hidden_size 256 \
         --darts_estimation_steps 20 \
 
-        --rew_model_path /home/rob/Git/meta_predictor/predictor_max_corr.pt \
+        # --rew_model_path /home/rob/Git/meta_predictor/predictor_max_corr.pt \
+        --rew_model_path /home/TUE/20184291/meta_predictor/predictor_max_corr.pt \
         --use_rew_estimation
     )
 
