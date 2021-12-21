@@ -2,12 +2,17 @@
 
 DATASET=$DS
 AGENT=ppo
-DATASET_DIR=/home/rob/Git/meta-fsl-nas/data
+# DATASET_DIR=/home/rob/Git/meta-fsl-nas/data
+DATASET_DIR=/home/TUE/20184291/Git/meta-fsl-nas/data
+
+
 
 for SEED in ${SEEDS}
 do
-    TRAIN_DIR=/home/rob/Git/meta-fsl-nas/metanas/results/${DS}/${AGENT}_metad2a_environment_2/seed_$SEED
-	mkdir -p $TRAIN_DIR
+    # TRAIN_DIR=/home/rob/Git/meta-fsl-nas/metanas/results/${DS}/${AGENT}_metad2a_environment_2/seed_$SEED
+	TRAIN_DIR=/home/TUE/20184291/Git/meta-fsl-nas/metanas/results/${DS}/${AGENT}_metad2a_environment_2/seed_$SEED
+
+    mkdir -p $TRAIN_DIR
 
     args=(
         # Execution

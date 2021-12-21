@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# source /home/TUE/20184291/miniconda3/etc/profile.d/conda.sh
-# source activate metanas
+source /home/TUE/20184291/miniconda3/etc/profile.d/conda.sh
+source activate metanas
 
 # Start tensorboard
 # tensorboard --logdir=/home/rob/Git/meta-fsl-nas/metanas/results/agent
