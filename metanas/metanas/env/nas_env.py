@@ -28,9 +28,8 @@ utilizing the OpenAI gym interface
 class NasEnv(gym.Env):
     metadata = {'render.modes': ['human']}
 
-    def __init__(self, config, meta_model,
-                 test_phase=False, cell_type="normal",
-                 reward_estimation=False,
+    def __init__(self, config, meta_model, test_phase=False,
+                 cell_type="normal", reward_estimation=False,
                  max_ep_len=200, test_env=None):
         super().__init__()
         self.config = config
@@ -66,7 +65,6 @@ class NasEnv(gym.Env):
                 *list(model.children())[:-1])
         else:
             # DARTS estimation of the network is used
-            self.max_task_train_steps = config.darts_estimation_steps
             self.task_train_steps = 0
 
             self.w_optim = torch.optim.Adam(
@@ -92,7 +90,6 @@ class NasEnv(gym.Env):
 
         # Episode step counter
         self.step_count = 0
-        self.terminate_episode = False
 
         # DARTS Cell graph
         # Intermediate + input nodes
@@ -105,10 +102,16 @@ class NasEnv(gym.Env):
         self.A[0, 1] = 0
         self.A[1, 0] = 0
 
+        # A's upper triangle
+        self.A_up = np.triu(self.A)
+
         # Initialize action space
         # |A| + 2*|O| + 1, +1 for the termination
-        action_size = len(self.A) + 2*len(self. primitives)  # + 1
+        action_size = len(self.A) + 2*len(self. primitives)
         self.action_space = spaces.Discrete(action_size)
+
+        # Tracking statistics
+        self.init_tracking_vars()
 
         # Environment/Gym.Env variables
         self.do_update = False
@@ -119,29 +122,14 @@ class NasEnv(gym.Env):
         self.encourage_increase = 2.0
         self.encourage_decrease = 0.0
 
-        # A's upper triangle
-        self.A_up = np.triu(self.A)
-        self.encourage_edges = {(i, j): 0
-                                for i in range(self.A_up.shape[0])
-                                for j in range(self.A_up.shape[1])
-                                if self.A_up[i, j] == 1}
+        self.min_rew, self.max_rew = config.min_rew, config.max_rew
 
-        self.unique_edges = {(i, j): 0
-                             for i in range(self.A_up.shape[0])
-                             for j in range(self.A_up.shape[1])
-                             if self.A_up[i, j] == 1}
-
-        # Initialize State / Observation space
-        self.initialize_observation_space()
-
-        self.max_rew = config.max_rew
-        self.min_rew = config.min_rew
         self.reward_range = (self.min_rew, self.max_rew)
         if self.encourage_exploration:
             self.reward_range = (self.min_rew, self.max_rew * 2.0)
 
-        # Tracking statistics
-        self.init_tracking_vars()
+        # Initialize State / Observation space
+        self.initialize_observation_space()
 
         # Settings specific for unit testing
         if test_env:
@@ -163,8 +151,8 @@ class NasEnv(gym.Env):
         self.path_graph = []
 
         # Moving average of the number of alpha adjust before traversing
-        self.avg_a_adj = 0
         self.n_a_adj = 0
+        self.avg_a_adj = 0
         self.a_adj_trav = 0
 
         self.alpha_adjustments = 0
@@ -181,16 +169,15 @@ class NasEnv(gym.Env):
 
         # Initialize the step counters
         self.step_count = 0
-        self.terminate_episode = False
 
-        # Set alphas and weights of the model
+        # Reset alphas and weights of the model
         self.meta_model.load_state_dict(self.meta_state)
         self.update_states()
 
         if not self.reward_estimation:
             self._init_darts_training()
 
-        # tracking the environment
+        # Reset tracking statistics
         self.init_tracking_vars()
 
         # Set starting edge for agent
@@ -203,12 +190,16 @@ class NasEnv(gym.Env):
         mask = self.invalid_mask[self.current_state_index]
         return self.current_state, mask
 
-    def set_task(self, task, meta_state):
+    def set_task(self, task, meta_state, test_phase=False):
         """The meta-loop passes the task for the environment to solve"""
+
         self.current_task = task
         self.meta_state = copy.deepcopy(meta_state)
 
         self.reset()
+
+        # Test phase with adjusted DARTS training
+        self.test_phase = test_phase
 
         # Reset best alphas and accuracy for current trial
         self.max_acc = 0.0
@@ -281,12 +272,13 @@ class NasEnv(gym.Env):
             raise RuntimeError(f"Cell type {self.cell_type} is not supported.")
 
         for i, edges in enumerate(self.normalized_alphas):
-
             # edges: Tensor(n_edges, n_ops)
             edge_max, edge_idx = torch.topk(edges[:, :], 1)
+
             # selecting the top-k input nodes, k=2
             _, topk_edge_indices = torch.topk(edge_max.view(-1), k=2)
 
+            # one-hot edges: Tensor(n_edges, n_ops)
             edge_one_hot = torch.zeros_like(edges[:, :])
             for hot_e, op in zip(edge_one_hot, edge_idx):
                 hot_e[op.item()] = 1
@@ -311,7 +303,7 @@ class NasEnv(gym.Env):
                         self.A[i+2],
                         edge.detach().numpy())))
 
-                self.invalid_mask.append(  # +1
+                self.invalid_mask.append(
                     np.hstack((self.A[i+2], np.ones((self.n_ops*2)))))
 
                 self.states.append(
@@ -322,36 +314,34 @@ class NasEnv(gym.Env):
                         self.A[j],
                         edge.detach().numpy())))
 
-                self.invalid_mask.append(  # +1
+                self.invalid_mask.append(
                     np.hstack((self.A[j], np.ones((self.n_ops*2)))))
 
                 s_idx += 2
-
-        # previous values dict
-        prev_dict = {
-            'prev_states': prev_states,
-            'prev_alphas': prev_alphas
-        }
 
         self.states = np.array(self.states)
         self.invalid_mask = np.array(self.invalid_mask)
         self.discrete_alphas = np.array(self.discrete_alphas)
 
-        return prev_dict
+        return {
+            'prev_states': prev_states,
+            'prev_alphas': prev_alphas
+        }
 
     def set_start_state(self):
-        # TODO: Random start or fixed starting point
-        idx = np.random.choice(range(len(self.encourage_edges)))
-        cur_node, next_node = list(self.encourage_edges.keys())[idx]
+        if self.config.use_env_random_start:
+            # Random starting point
+            idx = np.random.choice(range(len(self.encourage_edges)))
+            cur_node, next_node = list(self.encourage_edges.keys())[idx]
 
-        s_idx = self.edge_to_index[(cur_node, next_node)]
-        self.current_state_index = s_idx
-        self.current_state = self.states[s_idx]
-
-        # Fixed starting point
-        # self.current_state_index = 0
-        # self.current_state = self.states[
-        #     self.current_state_index]
+            s_idx = self.edge_to_index[(cur_node, next_node)]
+            self.current_state_index = s_idx
+            self.current_state = self.states[s_idx]
+        else:
+            # Fixed starting point
+            self.current_state_index = 0
+            self.current_state = self.states[
+                self.current_state_index]
 
     def _inverse_softmax(self, x, C):
         """Reverse calculation of the normalized alpha
@@ -375,8 +365,7 @@ class NasEnv(gym.Env):
             with torch.no_grad():
                 curr_op += prob
 
-            # Prevent 0.00 normalized alpha values, resulting in
-            # -inf
+            # Prevent 0.00 normalized alpha values resulting in -inf
             with torch.no_grad():
                 curr_edge += 0.01
 
@@ -415,8 +404,7 @@ class NasEnv(gym.Env):
             with torch.no_grad():
                 curr_op -= prob
 
-            # Prevent 0.00 normalized alpha values, resulting in
-            # -inf
+            # Prevent 0.00 normalized alpha values resulting in -inf
             with torch.no_grad():
                 curr_edge += 0.01
 
@@ -498,19 +486,13 @@ class NasEnv(gym.Env):
                     raise RuntimeError(
                         f"Cell type {self.cell_type} is not supported.")
 
-        # The final step time
-        end = time.time()
-        running_time = int(end - start)
-
-        self.step_count += 1
-
         # Conditions to terminate the episode
         done = self.step_count == self.max_ep_len or \
-            self.acc_estimations == self.max_task_train_steps-1 or \
-            self.terminate_episode
+            self.acc_estimations == self.max_task_train_steps-1
 
         # Invalid action mask
         mask = self.invalid_mask[self.current_state_index]
+        self.step_count += 1
 
         info_dict = {
             "step_count": self.step_count,
@@ -518,7 +500,7 @@ class NasEnv(gym.Env):
             "action_id": action,
             "action": action_info,
             "acc": acc,
-            "running_time": running_time,
+            "running_time": int(time.time() - start),
             "illegal_edge_traversals": self.illegal_edge_traversals,
         }
 
@@ -529,14 +511,13 @@ class NasEnv(gym.Env):
             info_dict['alpha_adjustments'] = self.alpha_adjustments
             info_dict['edge_traversals'] = self.edge_traversals
             info_dict['alpha_adj_before_trav'] = self.avg_a_adj
-
             info_dict['unique_edges'] = number_of_unique_visits(
                 self.unique_edges)
 
         return self.current_state, reward, done, info_dict, mask
 
     def close(self):
-        return NotImplemented
+        pass
 
     def _perform_action(self, action):
         """Perform the action on both the meta-model and local state"""
@@ -552,8 +533,7 @@ class NasEnv(gym.Env):
         # Adjacancy matrix A, navigating to the next node
         if action in np.arange(len(self.A)):
 
-            # Determine if agent is allowed to traverse
-            # the edge
+            # Determine if agent is allowed to traverse the edge
             if self.A[next_node][action] > 0:
                 # Legal action
                 cur_node = next_node
@@ -568,10 +548,6 @@ class NasEnv(gym.Env):
                 # Increase unique edge tracking
                 increase_edge(self.unique_edges,
                               cur_node, next_node)
-
-                # if get_edge_vists(self.unique_edges,
-                #                   cur_node, next_node) >= 5:
-                #     reward = -0.1
 
                 # Compute reward after updating
                 if self.do_update:
@@ -594,23 +570,13 @@ class NasEnv(gym.Env):
                         increase_edge(self.encourage_edges,
                                       cur_node, next_node)
 
-                        # Multiply the punishment, 0.25, 0.25, ...
-                        # multiplier = get_edge_vists(
-                        #     self.encourage_edges, cur_node, next_node)
+                        if self.encourage_exploration:
+                            if reward > 0.0:
+                                # Decrease reward
+                                reward = reward * \
+                                    (self.encourage_decrease)
 
-                        # enc_mult = 1
-                        # for i in [self.encourage_decrease]*multiplier:
-                        #     enc_mult *= i
-
-                        # if self.encourage_exploration:
-                        #     if reward > 0.0:
-                        #         # Decrease reward
-                        #         reward = reward * \
-                        #             (self.encourage_decrease)
-
-                        # * enc_mult
-
-                # TODO: States might change due to reward estimation
+                # States might change due to DARTS reward estimation
                 self.update_states()
 
                 # Action statistics
@@ -700,14 +666,6 @@ class NasEnv(gym.Env):
 
             action_info = f"Decrease alpha ({row_idx}, {edge_idx}, {action})"
 
-        # Terminate the episode
-        # if action in np.arange(len(self.A)+2*len(self.primitives),
-        #                        len(self.A)+2*len(self.primitives)+1):
-
-        #     # Action statistics
-        #     self.terminate_episode = True
-        #     action_info = f"Terminate the episode at step {self.step_count}"
-
         return action_info, reward, acc
 
     def compute_reward(self):
@@ -728,10 +686,6 @@ class NasEnv(gym.Env):
 
         # Scale reward to (min_rew, max_rew) range, [-min, max]
         reward = self.scale_reward(acc)
-
-        # Penalize reward
-        # if reward > 0.0:
-        #     reward = reward * (1-(self.step_count/self.max_ep_len))
 
         return reward, acc
 
@@ -770,20 +724,13 @@ class NasEnv(gym.Env):
         return reward
 
     def _init_darts_training(self):
-
         if self.test_phase:
-            # TODO: Implement proper test-phase environment for meta-testing
-            # top1_logger = self.config.top1_logger_test
-            # losses_logger = self.config.losses_logger_test
-            train_steps = self.config.test_task_train_steps
-            arch_adap_steps = int(
-                train_steps * self.config.test_adapt_steps)
-
+            self.train_steps = self.config.test_task_train_steps
+            self.arch_adap_steps = int(
+                self.train_steps * self.config.test_adapt_steps)
         else:
-            # top1_logger = self.config.top1_logger
-            # losses_logger = self.config.losses_logger
-            train_steps = self.config.darts_estimation_steps
-            arch_adap_steps = train_steps
+            self.train_steps = self.config.darts_estimation_steps
+            self.arch_adap_steps = self.train_steps
         self.task_train_steps = 0
 
         if self.config.w_task_anneal:
@@ -792,7 +739,7 @@ class NasEnv(gym.Env):
                 group["lr"] = self.config.w_lr
 
             self.w_task_lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-                self.w_optim, train_steps, eta_min=0.0
+                self.w_optim, self.train_steps, eta_min=0.0
             )
         else:
             self.w_task_lr_scheduler = None
@@ -802,7 +749,7 @@ class NasEnv(gym.Env):
                 group["lr"] = self.config.alpha_lr
 
             self.a_task_lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-                self.a_optim, arch_adap_steps, eta_min=0.0
+                self.a_optim, self.arch_adap_steps, eta_min=0.0
             )
         else:
             self.a_task_lr_scheduler = None
@@ -811,7 +758,7 @@ class NasEnv(gym.Env):
         if self.model_has_normalizer:
             self.meta_model.normalizer["params"]["curr_step"] = 0.0
             self.meta_model.normalizer["params"]["max_steps"] = float(
-                arch_adap_steps+1)
+                self.arch_adap_steps)
 
         if self.config.drop_path_prob > 0.0:
             # do drop path if not test phase (=in train phase) or if also use
@@ -833,7 +780,6 @@ class NasEnv(gym.Env):
             dropout_rate = self.dropout_stage * \
                 np.exp(-self.task_train_steps * self.scale_factor)
             self.meta_model.drop_out_skip_connections(dropout_rate)
-        self.task_train_steps += 1
 
         # Take w step scheduler step
         if self.w_task_lr_scheduler is not None:
@@ -851,7 +797,6 @@ class NasEnv(gym.Env):
                 self.config.device), train_y.to(self.config.device)
             val_X, val_y = val_X.to(
                 self.config.device), val_y.to(self.config.device)
-            N = train_X.size(0)
 
             # phase 2. architect step (alpha)
             self.a_optim.zero_grad()
@@ -876,8 +821,92 @@ class NasEnv(gym.Env):
             logits = self.meta_model(train_X, sparsify_input_alphas=True)
             prec1, _ = utils.accuracy(logits, train_y, topk=(1, 5))
 
-        if self.model_has_normalizer:
+        if (
+            self.model_has_normalizer
+            and self.task_train_steps < (self.arch_adap_steps - 1)
+        ):
             self.meta_model.normalizer["params"]["curr_step"] += 1
+
+        # Step increment
+        self.task_train_steps += 1
+
+        acc = prec1.item()
+        return acc
+
+    def _tse_darts_weight_alpha_estimation(self, task):
+        self.meta_model.train()
+
+        # Set operation level dropout
+        if self.config.dropout_skip_connections and not \
+                self.test_phase:
+
+            # Exponential decay in dropout rate
+            dropout_rate = self.dropout_stage * \
+                np.exp(-self.task_train_steps * self.scale_factor)
+            self.meta_model.drop_out_skip_connections(dropout_rate)
+
+        # Take w step scheduler step
+        if self.w_task_lr_scheduler is not None:
+            self.w_task_lr_scheduler.step()
+
+        if self.a_task_lr_scheduler is not None:
+            self.a_task_lr_scheduler.step()
+
+        lr = self.config.w_lr
+
+        self.meta_model.zero_grad()
+        model_init = copy.deepcopy(self.meta_model.state_dict())
+
+        for step, (train_X, train_y) in enumerate(task.train_loader):
+            train_X, train_y = train_X.to(
+                self.config.device), train_y.to(self.config.device)
+
+            # Step 1 of Algorithm 3 - collect TSE gradient
+            base_loss = self.meta_model.loss(train_X, train_y)
+            base_loss.backward()
+
+            self.w_optim.step()  # Train the weights during unrolling as normal,
+            # but the architecture gradients are not zeroed during the unrolling
+            self.w_optim.zero_grad()
+
+        # Step 2 of Algorithm 3 - update the architecture encoding using
+        # accumulated gradients
+        self.a_optim.step()
+        self.a_optim.zero_grad()  # Reset to get ready for new unrolling
+        self.w_optim.zero_grad()
+
+        # Temporary backup for new architecture encoding
+        new_arch_params = copy.deepcopy(self.meta_model._alphas)
+
+        # Old weights are loaded, which also reverts the architecture encoding
+        self.meta_model.load_state_dict(model_init)
+        for(_, p1), (_, p2) in zip(self.meta_model._alphas, new_arch_params):
+            p1.data = p2.data
+
+        # Step 3 of Algorithm 3 - training weights after updating the
+        # architecture encoding
+        for step, (train_X, train_y) in enumerate(task.train_loader):
+            train_X, train_y = train_X.to(
+                self.config.device), train_y.to(self.config.device)
+            base_loss = self.meta_model.loss(train_X, train_y)
+            base_loss.backward()
+            self.w_optim.step()
+
+            self.w_optim.zero_grad()
+            self.a_optim.zero_grad()
+
+            # Obtain accuracy with gradient step
+            logits = self.meta_model(train_X, sparsify_input_alphas=True)
+            prec1, _ = utils.accuracy(logits, train_y, topk=(1, 5))
+
+        if (
+            self.model_has_normalizer
+            and self.task_train_steps < (self.arch_adap_steps - 1)
+        ):
+            self.meta_model.normalizer["params"]["curr_step"] += 1
+
+        # Step increment
+        self.task_train_steps += 1
 
         acc = prec1.item()
         return acc
@@ -935,7 +964,7 @@ class NasEnv(gym.Env):
         acc = prec1.item()
         return acc
 
-    def _darts_evaluate_test_set(self):
+    def darts_evaluate_test_set(self):
         """Final evaluation over the test set
         """
         # Set max_meta_model weights
@@ -984,9 +1013,6 @@ class NasEnv(gym.Env):
         )
         genotype = self.meta_model.genotype()
 
-        # TODO: Create task info for the meta loop
-
-        # Return task-info?
         task_info = namedtuple(
             "task_info",
             [
@@ -1026,7 +1052,6 @@ class NasEnv(gym.Env):
         return y_pred
 
     def _meta_predictor_graph_preprocess(self):
-        # TODO: Use genotype function from meta_model possibly
         geno = parse(self.normalized_alphas, k=2,
                      primitives=gt.PRIMITIVES_NAS_BENCH_201)
 
@@ -1067,14 +1092,16 @@ class NasEnv(gym.Env):
 
         # Get num_samples, n_train * k
         # Testing dataset does not have enough samples
-        train_y, _ = next(iter(task.train_loader))
-        assert train_y.shape[0] == self.config.num_samples, \
-            "Number of samples should equal training of meta_predictor " \
-            f"{train_y.shape[0]}, {self.config.num_samples}"
+        train_X, _ = next(iter(task.train_loader))
 
         # Shape the image as (3, 32, 32)
-        train_y = train_y.to(self.config.device)
-        dataset = F.interpolate(train_y, size=(32, 32))
+        train_X = train_X.to(self.config.device)
+        dataset = F.interpolate(train_X, size=(32, 32))
+        dataset = fill_up_dataset(dataset, self.config.num_samples)
+
+        assert dataset.shape[0] == self.config.num_samples, \
+            "Number of samples should equal training of meta_predictor " \
+            f"{dataset.shape[0]}, {self.config.num_samples}"
 
         # Make sure there are 3 channels
         if self.config.dataset == "omniglot" or \
@@ -1082,6 +1109,7 @@ class NasEnv(gym.Env):
             dataset = dataset.repeat(1, 3, 1, 1)
 
         # Normalize the features
+        # TODO: Normalize for other datasets
         if self.config.dataset == "omniglot":
             mean = torch.tensor([0.9221]).to(self.config.device)
             std = torch.tensor([0.1257]).to(self.config.device)
@@ -1093,6 +1121,27 @@ class NasEnv(gym.Env):
         elif self.config.dataset == "miniimagenet":
             mean = torch.tensor([0.4416]).to(self.config.device)
             std = torch.tensor([0.2328]).to(self.config.device)
+        
+        elif self.config.dataset == "omniprint" and self.config.print_split == "meta1":
+            mean = torch.tensor([0.8693]).to(self.config.device)
+            std = torch.tensor([0.2104]).to(self.config.device)
+
+        elif self.config.dataset == "omniprint" and self.config.print_split == "meta2":
+            mean = torch.tensor([0.8481]).to(self.config.device)
+            std = torch.tensor([0.2308]).to(self.config.device)
+
+        elif self.config.dataset == "omniprint" and self.config.print_split == "meta3":
+            mean = torch.tensor([0.8670]).to(self.config.device)
+            std = torch.tensor([0.2171]).to(self.config.device)
+
+        elif self.config.dataset == "omniprint" and self.config.print_split == "meta4":
+            mean = torch.tensor([0.6226]).to(self.config.device)
+            std = torch.tensor([0.0818]).to(self.config.device)
+
+        elif self.config.dataset == "omniprint" and self.config.print_split == "meta5":
+            mean = torch.tensor([0.5685]).to(self.config.device)
+            std = torch.tensor([0.1241]).to(self.config.device)
+
         else:
             raise RuntimeError(
                 f"Dataset {self.config.dataset} is not supported.")
@@ -1101,7 +1150,21 @@ class NasEnv(gym.Env):
         # Extracts features by ResNet18
         return self.feature_extractor(dataset)
 
-# Helper functions
+# MetaD2A helper functions
+
+
+def fill_up_dataset(dataset, required_size):
+    ds_size = dataset.shape[0]
+    ds = copy.deepcopy(dataset)
+
+    # In case only downsizing is required
+    if ds_size >= required_size:
+        return dataset[:required_size]
+
+    while ds.size(0) < required_size:
+        perm = torch.randperm(len(ds))[:1].item()
+        ds = torch.cat((ds, ds[perm].unsqueeze(dim=0)))
+    return ds
 
 
 def decode_metad2a_to_igraph(row):
@@ -1141,6 +1204,8 @@ def parse(alpha, k, primitives=gt.PRIMITIVES_NAS_BENCH_201):
 
         gene.append(node_gene)
     return gene
+
+# Graph traversal helper functions
 
 
 def edge_become_topk(prev_dict, states, alphas, s_idx):
