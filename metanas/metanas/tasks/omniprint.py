@@ -1,8 +1,6 @@
-from torchmeta.utils.data import BatchMetaDataLoader
 import os
 import json
 import h5py
-import numpy as np
 from PIL import Image
 
 from torchmeta.utils.data import Dataset, ClassDataset, CombinationMetaDataset
@@ -12,17 +10,128 @@ from torchmeta.datasets.helpers import helper_with_default
 
 def omniprint(folder, shots, ways, shuffle=True, test_shots=None,
               seed=None, **kwargs):
+    """Helper function to create a meta-dataset for the OmniPrint dataset.
+
+    Parameters
+    ----------
+    folder : string
+        Root directory where the dataset folder `omniprint` exists.
+
+    shots : int
+        Number of (training) examples per class in each task. This corresponds
+        to `k` in `k-shot` classification.
+
+    ways : int
+        Number of classes per task. This corresponds to `N` in `N-way`
+        classification.
+
+    shuffle : bool (default: `True`)
+        Shuffle the examples when creating the tasks.
+
+    test_shots : int, optional
+        Number of test examples per class in each task. If `None`, then the
+        number of test examples is equal to the number of training examples per
+        class.
+
+    seed : int, optional
+        Random seed to be used in the meta-dataset.
+
+    kwargs
+        Additional arguments passed to the `OmniPrint` class.
+
+    See also
+    --------
+    `datasets.OmniPrint` : Meta-dataset for the OmniPrint dataset.
+    """
     return helper_with_default(OmniPrint, folder, shots, ways,
                                shuffle=shuffle, test_shots=test_shots,
                                seed=seed, **kwargs)
 
 
 class OmniPrint(CombinationMetaDataset):
+        """
+    The OmniPrint dataset [1] based on [2]. A synthetic generated dataset
+    of 1409 classes and 935 different fonts. Moreover, the dataset consists of
+    5 different splits increased synthetic noise.
+
+    Parameters
+    ----------
+    root : string
+        Root directory where the dataset folder `omniprint` exists.
+
+    num_classes_per_task : int
+        Number of classes per tasks. This corresponds to "N" in "N-way"
+        classification.
+
+    meta_train : bool (default: `False`)
+        Use the meta-train split of the dataset. If set to `True`, then the
+        arguments `meta_val` and `meta_test` must be set to `False`. Exactly one
+        of these three arguments must be set to `True`.
+
+    meta_val : bool (default: `False`)
+        Use the meta-validation split of the dataset. If set to `True`, then the
+        arguments `meta_train` and `meta_test` must be set to `False`. Exactly one
+        of these three arguments must be set to `True`.
+
+    meta_test : bool (default: `False`)
+        Use the meta-test split of the dataset. If set to `True`, then the
+        arguments `meta_train` and `meta_val` must be set to `False`. Exactly one
+        of these three arguments must be set to `True`.
+
+    meta_split : string in {'train', 'val', 'test'}, optional
+        Name of the split to use. This overrides the arguments `meta_train`,
+        `meta_val` and `meta_test` if all three are set to `False`.
+
+    print_split : string in {'meta1', 'meta2', 'meta3', 'meta4, 'meta5'}
+	(default: `None`)
+		The string value is mapped to the given OmniPrint split defined in [1].
+        The higher the meta split the more synthetic noise is added to the images
+        (raises an error when no print_split is defined).
+
+    transform : callable, optional
+        A function/transform that takes a `PIL` image, and returns a transformed
+        version. See also `torchvision.transforms`.
+
+    target_transform : callable, optional
+        A function/transform that takes a target, and returns a transformed
+        version. See also `torchvision.transforms`.
+
+    dataset_transform : callable, optional
+        A function/transform that takes a dataset (ie. a task), and returns a
+        transformed version of it. E.g. `torchmeta.transforms.ClassSplitter()`.
+
+    class_augmentations : list of callable, optional
+        A list of functions that augment the dataset with new classes. These classes
+        are transformations of existing classes. E.g.
+        `torchmeta.transforms.HorizontalFlip()`.
+
+    download : bool (default: `False`)
+        If `True`, downloads the zip files and processes the dataset in the root
+        directory (under the `omniglot` folder). If the dataset is already
+        available, this does not download/process the dataset again.
+
+    Notes
+    -----
+    The dataset is downloaded from the original [OmniPrint repository]
+    (https://github.com/SunHaozhe/OmniPrint-datasets). The meta train/validation/test
+    splits are over 900/149/360 classes.
+
+    References
+    ----------
+    .. [1] H. Sun, W.-W. Tu, I. M. Guyon (2021). OmniPrint: A Configurable Printed
+           Character Synthesizer. in Thirty-fifth Conference on Neural Information
+           Processing Systems Datasets and Benchmarks Track (Round 1),
+           (https://openreview.net/forum?id=R07XwJPmgpl)
+
+    .. [2] Lake, B. M., Salakhutdinov, R., and Tenenbaum, J. B. (2015). Human-level
+           concept learning through probabilistic program induction. Science, 350(6266),
+           1332-1338 (http://www.sciencemag.org/content/350/6266/1332.short)
+
+	"""
     def __init__(self, root, num_classes_per_task=None, meta_train=False,
                  meta_val=False, meta_test=False, meta_split=None,
                  transform=None, target_transform=None, dataset_transform=None,
-                 class_augmentations=None, download=False,
-                 print_split='meta1',  # Addition for the OmniPrint dataset
+                 class_augmentations=None, download=False, print_split=None
                  ):
         dataset = OmniPrintClassDataset(
             root, meta_train=meta_train,
@@ -73,6 +182,8 @@ class OmniPrintClassDataset(ClassDataset):
         if download:
             self.download()
 
+        if not self._check_integrity():
+            raise RuntimeError('OmniPrint integrity check failed')
         self._num_classes = len(self.labels)
 
     def __getitem__(self, index):
@@ -116,6 +227,9 @@ class OmniPrintClassDataset(ClassDataset):
         import shutil
         import glob
         from tqdm import tqdm
+
+        if self._check_integrity():
+            return
 
         zip_foldername = os.path.join(
             self.root, self.zip_filename.format(self.folder))
@@ -178,7 +292,7 @@ class OmniPrintDataset(Dataset):
         return len(self.data)
 
     def __getitem__(self, index):
-        image = np.asarray(self.data[index])
+        image = Image.fromarray(self.data[index])
         target = self.character_name
 
         if self.transform is not None:

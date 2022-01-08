@@ -28,7 +28,7 @@ class MetaPredictor:
         self.num_samples = config.num_samples
 
         self.logger = config.logger
-        self.meta_test = config.use_rew_estimation
+        self.meta_test = config.use_metad2a_estimation
         self.max_corr_dict = {'corr': 0, 'epoch': 0, 'loss': -1}
 
         # Test when used as discrete estimate on the RL environment

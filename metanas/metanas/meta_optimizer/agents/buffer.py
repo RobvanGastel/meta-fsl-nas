@@ -52,7 +52,7 @@ class EpisodicBuffer:
         Append one timestep of agent-environment interaction to the buffer.
         """
         # buffer has to have room so you can store
-        # assert self.ptr < self.max_size
+        assert self.ptr < self.max_size
 
         self.obs_buf[self.ptr] = obs
         self.next_obs_buf[self.ptr] = next_obs

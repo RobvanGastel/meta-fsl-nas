@@ -1,5 +1,6 @@
 
 from torch.utils.data import DataLoader, RandomSampler, TensorDataset
+from metanas.tasks.omniprint import omniprint
 from torchmeta.datasets import Omniglot
 from torchmeta.transforms import Categorical, ClassSplitter, Rotation
 from torchvision.transforms import Compose, Resize, ToTensor, Grayscale
@@ -75,7 +76,7 @@ def create_omniprint_data_loader(
     download=False,
     seed=None
 ):
-    dataset = miniimagenet(
+    dataset = omniprint(
         root,
         n_shot,
         k_way,
@@ -509,13 +510,14 @@ class TripleMNISTFewShot(TorchmetaTaskDistribution):
 
 
 class OmniPrintFewShot(TorchmetaTaskDistribution):
-    def __init__(self, config, download=False, print_split=None):
+    def __init__(self, config, download=False):
         super().__init__(config, 1, 32, download)
 
+        self.print_split = config.print_split
         self.train_loader = create_omniprint_data_loader(
             self.data_path,
             "train",
-            print_split,
+            self.print_split,
             self.k_way,
             self.n_shot_train,
             self.n_query,
@@ -529,7 +531,7 @@ class OmniPrintFewShot(TorchmetaTaskDistribution):
         self.val_loader = create_omniprint_data_loader(
             self.data_path,
             "val",
-            print_split,
+            self.print_split,
             self.k_way,
             self.n_shot_test,
             self.n_query,
@@ -543,7 +545,7 @@ class OmniPrintFewShot(TorchmetaTaskDistribution):
         self.test_loader = create_omniprint_data_loader(
             self.data_path,
             "test",
-            print_split,
+            self.print_split,
             self.k_way,
             self.n_shot_test,
             self.n_query,

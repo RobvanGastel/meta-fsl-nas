@@ -38,7 +38,6 @@ class RolloutBuffer:
         self.act_buf = np.zeros(
             combined_shape(size, act_dim), dtype=np.float32)
 
-        # 14
         self.mask_buf = np.zeros((size, mask_dim), dtype=np.float32)
 
         self.adv_buf = np.zeros(size, dtype=np.float32)
@@ -57,7 +56,8 @@ class RolloutBuffer:
         self.gamma, self.lam = gamma, lam
         self.ptr, self.path_start_idx, self.max_size = 0, 0, size
 
-    def store(self, obs, act, rew, logp, val, prev_act, prev_rew, hidden, mask):
+    def store(self, obs, act, rew, logp, val, prev_act, prev_rew,
+              hidden, mask):
         """
         Append one timestep of agent-environment interaction to the buffer.
         """
@@ -69,7 +69,7 @@ class RolloutBuffer:
         self.val_buf[self.ptr] = val
         self.logp_buf[self.ptr] = logp
 
-        # Mask
+        # Action masking
         self.mask_buf[self.ptr] = mask
 
         self.hxs_buf[self.ptr] = hidden
@@ -97,8 +97,7 @@ class RolloutBuffer:
         rews = np.append(self.rew_buf[path_slice], last_val)
         vals = np.append(self.val_buf[path_slice], last_val)
 
-        # EXPLOITATION calculation
-
+        # Exploitation calculation
         # the next two lines implement GAE-Lambda advantage calculation
         deltas = rews[:-1] + self.gamma * vals[1:] - vals[:-1]
         self.adv_buf[path_slice] = discount_cumsum(deltas,
@@ -126,9 +125,8 @@ class RolloutBuffer:
                 for k, v in data.items()}
         self.exploitation_batch = np.append(self.exploitation_batch, data)
 
-        # EXPLORATION calculation
-        # set the return of the episode to 0
-
+        # Exploration calculation, set the return of the episode to 0 based on
+        # E-RL^2 to encourage exploration
         if self.use_exploration_sampling:
             rews_zero = np.zeros_like(rews)
 
@@ -217,15 +215,14 @@ class RolloutBuffer:
 class PPO(RL_agent):
     def __init__(
             self, config, env, logger_kwargs=dict(), seed=42, save_freq=1,
-            gamma=0.99, lr=3e-4, clip_ratio=0.2, ppo_iter=4,
+            gamma=0.99, lr=3e-4, clip_ratio=0.2, ppo_iter=4, update_freq=10,
             lam=0.97, target_kl=0.01, value_coef=0.25, entropy_coef=0.01,
             epochs=100, steps_per_epoch=4000, hidden_size=256,
             count_trajectories=True, number_of_trajectories=100,
-            exploration_sampling=False):
+            exploration_sampling=False, model_path=None):
         super().__init__(config, env, logger_kwargs,
                          seed, gamma, lr, save_freq)
 
-        # Currently too init low for my purpose?
         self.lmbda = lam
         self.gamma = gamma
         self.clip_ratio = clip_ratio
@@ -234,35 +231,39 @@ class PPO(RL_agent):
         self.ppo_iters = ppo_iter
         self.target_kl = target_kl
         self.hidden_size = hidden_size
+        self.update_freq = update_freq
 
         # Meta-learning parameters
         self.count_trajectories = count_trajectories
+
+        self.global_steps = 0
+        self.global_test_steps = 0
+        # epochs = 1, if every task gets a single trial
+        self.epochs = epochs
+
+        # Trial number of trajectories
         if count_trajectories:
-            self.number_of_trajectories = number_of_trajectories
-            self.total_traj = 0
-            self.current_test_epoch = 0
             self.current_epoch = 0
-            self.steps_per_epoch = self.number_of_trajectories * self.max_ep_len
+            self.number_of_trajectories = number_of_trajectories
+            self.steps_per_epoch = number_of_trajectories * self.max_ep_len
         else:
+            # Trial by number of steps
             self.steps_per_epoch = steps_per_epoch
 
         # NAS environment
         self.graph_walks = []
 
-        # epochs = 1, if every task gets a single trial
-        self.epochs = epochs
-
-        # Meta-testing environment
-        self.test_env = None
-
-        self.global_steps = 0
-        self.global_test_steps = 0
-
         self.ac = ActorCritic(env, hidden_size, self.device).to(self.device)
         self.optimizer = Adam(self.ac.parameters(), lr=lr, eps=1e-5)
 
+        if model_path is not None:
+            meta_state = torch.load(model_path)
+            self.ac.load_state_dict(meta_state['ac'].state_dict())
+            self.optimizer.load_state_dict(meta_state['opt'].state_dict())
+
         # Set up model saving
-        self.logger.setup_pytorch_saver(self.ac)
+        self.logger.setup_pytorch_saver({'ac': self.ac,
+                                         'opt': self.optimizer})
 
         obs_dim = env.observation_space.shape
         act_dim = env.action_space.shape
@@ -394,7 +395,7 @@ class PPO(RL_agent):
         a2 = np.array([[0]])
         r2 = 0
 
-        for epoch in range(self.epochs):
+        for _ in range(self.epochs):
             # Inbetween trials reset the hidden weights
             h_in = torch.zeros([1, 1, self.hidden_size]).to(self.device)
             h_out = torch.zeros([1, 1, self.hidden_size]).to(self.device)
@@ -411,12 +412,12 @@ class PPO(RL_agent):
                     a, v, logp_a, h_out = self.get_action(
                         o, a2, r2, h_in, mask)
                     next_o, r, d, info_dict, mask = self.env.step(a[0])
+
                     ep_ret += r
                     ep_len += 1
 
-                    # DARTS environment information logging
-                    if 'acc' in info_dict:
-                        self._log_nas_info_dict(info_dict)
+                    # DARTS environment logging
+                    self._log_nas_info_dict(info_dict)
 
                     # save and log
                     self.storage.store(o, a, r, logp_a, v, a2,
@@ -444,25 +445,22 @@ class PPO(RL_agent):
 
                 self.logger.store(EpRet=ep_ret, EpLen=ep_len)
 
-                if tr >= 10 and \
-                        tr % 10 == 0:
+                if tr >= self.update_freq and \
+                        tr % self.update_freq == 0:
                     self.update()
                     self.storage.reset()
-
-                # Perform PPO update!
-                # self.update()
-                # self.storage.reset()
 
             self.current_epoch += 1
 
         # Calculate final test reward, at the end of the episode
-        task_info = self.env._darts_evaluate_test_set()
+        task_info = self.env.darts_evaluate_test_set()
         self.logger.store(TestAcc=task_info.top1)
 
+        # Log the trial experiment
         self._log_trial(self.current_epoch, start_time)
-
-        # Write graph walks
         self._log_graph_walks()
+
+        # Return the task-info for the MAML loop
         return task_info
 
     def train_step_agent(self, env):
@@ -471,6 +469,7 @@ class PPO(RL_agent):
         # Prepare for interaction with environment
         self.env = env
         start_time = time.time()
+
         o, mask, ep_ret, ep_len = self.env.reset(), 0, 0
 
         # RL^2 variables
@@ -480,7 +479,7 @@ class PPO(RL_agent):
         a2 = np.array([[0]])
         r2 = 0
 
-        for epoch in range(self.epochs):
+        for _ in range(self.epochs):
             for t in range(self.steps_per_epoch):
                 # Keeping track of current hidden states
                 h_in = h_out
@@ -491,9 +490,8 @@ class PPO(RL_agent):
                 ep_ret += r
                 ep_len += 1
 
-                # DARTS information
-                if 'acc' in info_dict:
-                    self._log_nas_info_dict(info_dict)
+                # DARTS information logging
+                self._log_nas_info_dict(info_dict)
 
                 # save and log
                 self.storage.store(o, a, r, logp_a, v, a2,
@@ -511,9 +509,8 @@ class PPO(RL_agent):
                 terminal = d or timeout
                 epoch_ended = t == self.steps_per_epoch-1
 
-                # TODO: Introduce variable for update step
-                if t >= 1000 and \
-                        self.global_steps % 1000 == 0:
+                if t >= self.update_freq and \
+                        self.global_steps % self.update_freq == 0:
                     self.update()
                     self.storage.reset()
 
@@ -539,48 +536,56 @@ class PPO(RL_agent):
 
                 # Increase global steps for the next trial
                 self.global_steps += 1
+            self.current_epoch += 1
 
-            # TODO: Perform updates every n steps?
-            # Perform PPO update!
-            # self.update()
-            # self.storage.reset()
+        # Calculate final test reward, at the end of the episode
+        task_info = self.env.darts_evaluate_test_set()
+        self.logger.store(TestAcc=task_info.top1)
 
-            self._log_trial(epoch, start_time)
-
-        # Write graph walks
+        # Log the trial experiment
+        self._log_trial(self.current_epoch, start_time)
         self._log_graph_walks()
 
-    def test_agent(self, test_env, num_test_episodes=10):
-        self.test_env = test_env
+        # Return the task-info for the MAML loop
+        return task_info
 
-        h = torch.zeros([1, 1, self.hidden_size]).to(self.device)
-        start_time = time.time()
+    def test_agent(self, test_env, num_test_episodes=10):
+
         a2, r2 = np.array([[0]]), 0
 
         for _ in range(num_test_episodes):
-            o, d, ep_ret, ep_len = self.test_env.reset(), False, 0, 0
+            d, ep_ret, ep_len = False, 0, 0
+            h = torch.zeros([1, 1, self.hidden_size]).to(self.device)
+            o, mask = test_env.reset()
 
             while not(d or (ep_len == self.max_ep_len)):
-                a, _, _, h = self.get_action(o, a2, r2, h)
+                a, _, _, h = self.get_action(
+                    o, a2, r2, h, mask)
+                o2, r, d, info_dict, mask = test_env.step(a[0])
 
-                o2, r, d, info_dict = self.test_env.step(a)
-
+                # Update obs (critical!)
                 o = o2
+
+                # Set the previous reward and action
                 r2 = r
                 a2 = a
 
                 ep_ret += r
                 ep_len += 1
 
-                # DARTS information
-                if 'acc' in info_dict:
-                    self._log_nas_info_dict(info_dict)
+                # DARTS information logging
+                self._log_test_nas_info(info_dict)
 
                 self.global_test_steps += 1
 
-            # self.logger.store(TestEpRet=ep_ret, TestEpLen=ep_len,
-            #                   TestEpMaxAcc=ep_max_acc)
-        # self._log_test_trial(self.global_test_steps, start_time)
+            self.logger.store(MetaTestEpRet=ep_ret, MetaTestEpLen=ep_len)
+
+        # Calculate final test reward, at the end of the episode
+        task_info = test_env.darts_evaluate_test_set()
+        self.logger.store(MetaTestTestAcc=task_info.top1)
+
+        self._log_test_trial(self.current_epoch)
+
     def _log_graph_walks(self):
         d = shelve.open(self.config.graph_walk_path)
         d[str(self.config.graph_walk_index)] = self.graph_walks
@@ -640,10 +645,22 @@ class PPO(RL_agent):
         if 'path_graph' in info_dict:
             self.graph_walks.append(info_dict['path_graph'])
 
-    def _log_trial(self, epoch, start_time):
-        # Log to tensorboard
+    def _log_test_nas_info(self, info_dict):
+        # Accuracy information
+        acc = info_dict['acc']
+        if acc is not None:
+            self.logger.store(
+                MetaTestAcc=info_dict['acc']
+            )
 
+        if 'test_acc' in info_dict:
+            self.logger.store(
+                MetaTestTestAcc=info_dict['test_acc']
+            )
+
+    def _log_trial(self, epoch, start_time):
         try:
+            # Log to tensorboard
             log_board = {
                 'Performance': [
                     'EpRet', 'EpLen', 'VVals', 'Entropy',
@@ -657,8 +674,7 @@ class PPO(RL_agent):
                 ],
                 'Loss': ['LossPi', 'LossV', 'Loss',
                          'DeltaLossPi', 'DeltaLossV',
-                         'DeltaLoss'
-                         ]}
+                         'DeltaLoss']}
 
             for key, value in log_board.items():
                 for val in value:
@@ -687,7 +703,7 @@ class PPO(RL_agent):
                 'Acc', average_only=True, with_min_and_max=True)
             self.logger.log_tabular(
                 'TestAcc', average_only=True, with_min_and_max=True)
-            # self.logger.log_tabular('EpMaxAcc', with_min_and_max=True)
+
             self.logger.log_tabular('VVals', with_min_and_max=True)
             self.logger.log_tabular('TotalEnvInteracts',
                                     self.global_steps)
@@ -714,37 +730,24 @@ class PPO(RL_agent):
             self.logger.log_tabular('Time', time.time()-start_time)
             self.logger.dump_tabular()
         except:
-            pass
+            print(f"Unable to log meta-training epoch {epoch}")
 
-    # def _log_test_trial(self, t, start_time):
-    #     pass
-        # trial = (t+1) // self.steps_per_epoch
+    def _log_test_trial(self, epoch):
+        try:
+            # Log info about the current trial
+            log_board = {
+                'Performance': ['MetaTestEpRet', 'MetaTestEpLen'],
+                'Environment': ['MetaTestAcc', 'MetaTestTestAcc']}
 
-        # # Save model
-        # if (trial % self.save_freq == 0) or (trial == self.epochs):
-        #     self.logger.save_state({'env': self.env}, None)
+            for key, value in log_board.items():
+                for val in value:
+                    mean, std = self.logger.get_stats(val)
+                    if key == 'Performance' or key == "Environment":
+                        self.summary_writer.add_scalar(
+                            key+'/Average'+val, mean,
+                            self.global_test_steps)
+                        self.summary_writer.add_scalar(
+                            key+'/Std'+val, std, self.global_test_steps)
 
-        # # Log info about the current trial
-        # log_board = {
-        #     'Performance': ['TestEpRet', 'TestEpLen', 'TestEpMaxAcc']}
-
-        # # Update tensorboard
-        # for key, value in log_board.items():
-        #     for val in value:
-        #         mean, std = self.logger.get_stats(val)
-
-        #         if key == 'Performance':
-        #             self.summary_writer.add_scalar(
-        #                 key+'/Average'+val, mean, t)
-        #             self.summary_writer.add_scalar(
-        #                 key+'/Std'+val, std, t)
-        #         else:
-        #             self.summary_writer.add_scalar(
-        #                 key+'/'+val, mean, t)
-
-        # self.logger.log_tabular('TestEpRet', with_min_and_max=True)
-        # self.logger.log_tabular('TestEpLen', average_only=True)
-        # # Ignore this metric for non-NAS environments
-        # self.logger.log_tabular('TestEpMaxAcc', with_min_and_max=True)
-        # self.logger.log_tabular('Time', time.time()-start_time)
-        # self.logger.dump_tabular()
+        except:
+            print(f"Unable to log meta-testing epoch {epoch}")

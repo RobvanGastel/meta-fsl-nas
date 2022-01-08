@@ -130,12 +130,15 @@ def set_hyperparameter(config):
 def set_rl_hyperparameters(config):
     config.logger_kwargs = setup_logger_kwargs(config.path,
                                                seed=config.seed)
+    config.count_trajectories = True
     config.number_of_trajectories = 30
-    config.num_test_episodes = 3
+    config.num_test_episodes = 5
 
-    # DARTS estimation config
-    # config.darts_estimation_steps = 7
+    # DARTS estimation
     config.update_weights_and_alphas = True
+
+    # E-RL2 sampling
+    config.exploration_sampling = config.agent_exploration
 
     # Configure reward range
     config.max_rew = 2.0
@@ -148,14 +151,16 @@ def set_rl_hyperparameters(config):
     if config.agent == "ppo":
         config.gamma = 0.99
         config.polyak = 0.995
+
         config.agent_lr = 3e-4
+        config.agent_ppo_iter = 4
+        config.agent_lambda = 0.97
 
         config.agent_trials_per_mdp = 1
-        config.agent_batch_size = 8
-        config.agent_update_every = 20
-        config.agent_start_steps = 400
+        config.agent_batch_size = 10
+        config.agent_update_freq = 10
 
-        config.save_freq = 1
+        config.save_freq = 10
         config.replay_size = int(1e6)
     elif config.agent != "random":
         raise RuntimeError(f"No hp parameters for {config.agent} agent")
