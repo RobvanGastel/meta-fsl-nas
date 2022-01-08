@@ -1,14 +1,28 @@
 #!/bin/bash
 
-DATASET=$DS
-AGENT=sac
+source /home/TUE/20184291/miniconda3/etc/profile.d/conda.sh
+source activate metanas
+
+# parameters
+EPOCHS=100
+WARM_UP=0
+SEEDS=(2)
+
+DATASET=omniglot
+N=1
+K=20
 DATASET_DIR=/home/rob/Git/meta-fsl-nas/data
-MODEL_PATH=/home/rob/Desktop/e200_meta_state
+EVAL_FREQ=25
+
+AGENT=ppo
+
+echo "Start run ${AGENT}, variables: epochs = ${EPOCHS}, warm up variables = ${WARM_UP}, seeds = ${SEEDS[@]}, dataset = ${DATASET}"
 
 for SEED in ${SEEDS}
 do
-    TRAIN_DIR=/home/rob/Git/meta-fsl-nas/metanas/results/agent/${DS}_metanas_${AGENT}_agent_metad2a/${DS}_metanas_${AGENT}_agent__metad2a_$SEED
-	mkdir -p $TRAIN_DIR
+    TRAIN_DIR=/home/rob/Git/meta-fsl-nas/metanas/results/${AGENT}_debug/seed_$SEED
+
+    mkdir -p $TRAIN_DIR
 
     args=(
         # Execution
@@ -29,7 +43,7 @@ do
         # examples per class
         --n $N \
         # number classes
-        --k 5 \
+        --k $K \
         # test examples per class
         --q 1 \
 
@@ -44,7 +58,7 @@ do
 
         --eval_freq $EVAL_FREQ \
         --eval_epochs 50 \
-        --print_freq 100 \
+        --print_freq 5 \
 
         --normalizer softmax \
         --normalizer_temp_anneal_mode linear \
@@ -60,25 +74,29 @@ do
         --use_first_order_darts \
         --use_torchmeta_loader \
 
-        # Custom DARTS adjustments
-        --primitives_type nasbench201 \
-        --dropout_skip_connections \
+        # DARTS training adjustments
+        # --dropout_skip_connections \
 
-        # Default M=2,
-        --use_limit_skip_connection \
+        # # Default M=2,
+        # --use_limit_skip_connection \
 
-        # meta-RL agent
-        # Warm-up pre-trained,
-        # --model_path ${MODEL_PATH} \
+		# Environment
+		--darts_estimation_steps 12 \
+        --use_env_random_start \
 
+
+        # meta-RL optimization
         --agent ${AGENT} \
         --agent_hidden_size 256 \
-        --agent_update_every 20 \
-        --agent_update_after 400 \
 
-        --rew_model_path /home/rob/Git/meta_predictor/predictor_max_corr.pt \
-        --use_rew_estimation
+		# MetaD2A estimation
+		--use_metad2a_estimation \
+        --primitives_type nasbench201 \
+		--rew_model_path /home/rob/Git/meta_predictor/predictor_max_corr.pt \
+		--rew_data_path /home/rob/Git/meta-fsl-nas/data/predictor \
     )
+
+
 
     python -u -m metanas.metanas_main "${args[@]}"
 
