@@ -131,7 +131,7 @@ def set_rl_hyperparameters(config):
     config.logger_kwargs = setup_logger_kwargs(config.path,
                                                seed=config.seed)
     config.count_trajectories = True
-    config.number_of_trajectories = 50
+    config.number_of_trajectories = 30
     config.num_test_episodes = 5
 
     # DARTS estimation

@@ -20,7 +20,7 @@ echo "Start run ${AGENT}, variables: epochs = ${EPOCHS}, warm up variables = ${W
 
 for SEED in ${SEEDS}
 do
-    TRAIN_DIR=/home/rob/Git/meta-fsl-nas/metanas/results/${DATSASET}_n${N}_k${K}/${AGENT}_metad2a_env_traj_50_w_betas/seed_$SEED
+    TRAIN_DIR=/home/TUE/20184291/meta-fsl-nas/metanas/results/${DATSASET}_n${N}_k${K}/${AGENT}_metad2a_env_traj_50_w_betas/seed_$SEED
 	mkdir -p $TRAIN_DIR
 
     args=(
@@ -91,8 +91,9 @@ do
 		# MetaD2A estimation
 		--use_metad2a_estimation \
         --primitives_type nasbench201 \
-		--rew_model_path /home/rob/Git/meta_predictor/predictor_max_corr.pt \
-		--rew_data_path /home/rob/Git/meta-fsl-nas/data/predictor \
+
+		--rew_data_path /home/TUE/20184291/meta-fsl-nas/metanas/data/ \
+        --rew_model_path /home/TUE/20184291/meta-fsl-nas/metanas/data/meta_predictor/predictor_max_corr.pt \
 
         # meta-RL agent
         --agent ${AGENT} \
