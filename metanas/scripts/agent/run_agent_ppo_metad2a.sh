@@ -4,7 +4,7 @@ source /home/TUE/20184291/miniconda3/etc/profile.d/conda.sh
 source activate metanas
 
 # parameters
-EPOCHS=100
+EPOCHS=150
 WARM_UP=0
 SEEDS=(2)
 
@@ -20,7 +20,7 @@ echo "Start run ${AGENT}, variables: epochs = ${EPOCHS}, warm up variables = ${W
 
 for SEED in ${SEEDS}
 do
-    TRAIN_DIR=/home/rob/Git/meta-fsl-nas/metanas/results/${DATSASET}_N${N}_K${K}/${AGENT}_metad2a_env_1/seed_$SEED
+    TRAIN_DIR=/home/rob/Git/meta-fsl-nas/metanas/results/${DATSASET}_n${N}_k${K}/${AGENT}_metad2a_env_traj_50_w_betas/seed_$SEED
 	mkdir -p $TRAIN_DIR
 
     args=(
@@ -81,19 +81,24 @@ do
         # --use_limit_skip_connection \
 
 		# Environment
+        # 8 or 12
 		--darts_estimation_steps 12 \
         --use_env_random_start \
 
-        # meta-RL agent
-        --agent ${AGENT} \
-		--agent_exploration \
-        --agent_hidden_size 256 \
-
+        --env_min_rew -0.10 \
+        --env_max_rew 1.00 \
+        
 		# MetaD2A estimation
 		--use_metad2a_estimation \
         --primitives_type nasbench201 \
 		--rew_model_path /home/rob/Git/meta_predictor/predictor_max_corr.pt \
 		--rew_data_path /home/rob/Git/meta-fsl-nas/data/predictor \
+
+        # meta-RL agent
+        --agent ${AGENT} \
+        # E-RL^2
+		--agent_exploration \
+        --agent_hidden_size 256 \
     )
 
     python -u -m metanas.metanas_main "${args[@]}"

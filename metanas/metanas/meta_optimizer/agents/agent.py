@@ -9,7 +9,7 @@ from metanas.meta_optimizer.agents.utils.logx import EpochLogger
 
 class RL_agent(ABC):
     def __init__(self, config, env, logger_kwargs,
-                 seed, gamma, lr, save_freq):
+                 seed, gamma, lr):
 
         # SpinngingUp logging & Tensorboard
         self.logger = EpochLogger(**logger_kwargs)
@@ -28,7 +28,6 @@ class RL_agent(ABC):
         # Model parameters
         self.lr = lr
         self.gamma = gamma
-        self.save_freq = save_freq
 
         self.device = torch.device(
             "cuda" if torch.cuda.is_available() else "cpu")

@@ -1,4 +1,5 @@
 import shelve
+import pickle
 import numpy as np
 
 import time
@@ -214,14 +215,14 @@ class RolloutBuffer:
 
 class PPO(RL_agent):
     def __init__(
-            self, config, env, logger_kwargs=dict(), seed=42, save_freq=1,
+            self, config, env, logger_kwargs=dict(), seed=42,
             gamma=0.99, lr=3e-4, clip_ratio=0.2, ppo_iter=4, update_freq=10,
             lam=0.97, target_kl=0.01, value_coef=0.25, entropy_coef=0.01,
             epochs=100, steps_per_epoch=4000, hidden_size=256,
             count_trajectories=True, number_of_trajectories=100,
-            exploration_sampling=False, model_path=None):
+            exploration_sampling=False, model_path=None, vars_path=None):
         super().__init__(config, env, logger_kwargs,
-                         seed, gamma, lr, save_freq)
+                         seed, gamma, lr)
 
         self.lmbda = lam
         self.gamma = gamma
@@ -260,6 +261,11 @@ class PPO(RL_agent):
             meta_state = torch.load(model_path)
             self.ac.load_state_dict(meta_state['ac'].state_dict())
             self.optimizer.load_state_dict(meta_state['opt'].state_dict())
+
+            vars_dict = pickle.load(open(vars_path, 'r'))
+            self.global_steps = vars_dict['steps']
+            self.global_test_steps = vars_dict['test_steps']
+            self.current_epoch = vars_dict['epoch']
 
         # Set up model saving
         self.logger.setup_pytorch_saver({'ac': self.ac,

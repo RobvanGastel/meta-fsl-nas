@@ -1109,7 +1109,6 @@ class NasEnv(gym.Env):
             dataset = dataset.repeat(1, 3, 1, 1)
 
         # Normalize the features
-        # TODO: Normalize for other datasets
         if self.config.dataset == "omniglot":
             mean = torch.tensor([0.9221]).to(self.config.device)
             std = torch.tensor([0.1257]).to(self.config.device)
@@ -1121,7 +1120,7 @@ class NasEnv(gym.Env):
         elif self.config.dataset == "miniimagenet":
             mean = torch.tensor([0.4416]).to(self.config.device)
             std = torch.tensor([0.2328]).to(self.config.device)
-        
+
         elif self.config.dataset == "omniprint" and self.config.print_split == "meta1":
             mean = torch.tensor([0.8693]).to(self.config.device)
             std = torch.tensor([0.2104]).to(self.config.device)

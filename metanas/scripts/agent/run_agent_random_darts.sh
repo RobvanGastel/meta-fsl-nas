@@ -20,7 +20,7 @@ echo "Start run ${AGENT}, variables: epochs = ${EPOCHS}, warm up variables = ${W
 
 for SEED in ${SEEDS}
 do
-    TRAIN_DIR=/home/rob/Git/meta-fsl-nas/metanas/results/${DATSASET}_N${N}_K${K}/${AGENT}_metad2a_env_1/seed_$SEED
+    TRAIN_DIR=/home/rob/Git/meta-fsl-nas/metanas/results/${DATSASET}_n${N}_k${K}/${AGENT}_metad2a_env_1/seed_$SEED
 	mkdir -p $TRAIN_DIR
 
     args=(
@@ -81,12 +81,15 @@ do
         # --use_limit_skip_connection \
 
 		# Environment
+        # 8 or 12
 		--darts_estimation_steps 12 \
         --use_env_random_start \
 
+        --env_min_rew -0.10 \
+        --env_max_rew 2.00 \
+
         # meta-RL agent
         --agent ${AGENT} \
-		--agent_exploration \
         --agent_hidden_size 256 \
     )
 

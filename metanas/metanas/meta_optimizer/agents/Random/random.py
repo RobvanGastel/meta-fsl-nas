@@ -13,11 +13,11 @@ class RandomPolicy:
 
 
 class RandomAgent(RL_agent):
-    def __init__(self, config, env, logger_kwargs=dict(), seed=42, save_freq=1,
+    def __init__(self, config, env, logger_kwargs=dict(), seed=42,
                  gamma=0.99, lr=1e-3, epochs=1, steps_per_epoch=4000,
                  number_of_trajectories=10, count_trajectories=True):
         super().__init__(config, env, logger_kwargs,
-                         seed, gamma, lr, save_freq)
+                         seed, gamma, lr)
 
         # Meta-learning parameters
         # Either give a fixed number of trajectories or steps per trial

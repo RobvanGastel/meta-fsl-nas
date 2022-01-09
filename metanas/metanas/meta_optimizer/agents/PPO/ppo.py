@@ -97,12 +97,12 @@ class RolloutBuffer:
 
 class PPO(RL_agent):
     def __init__(
-            self, config, env, logger_kwargs=dict(), seed=42, save_freq=1,
+            self, config, env, logger_kwargs=dict(), seed=42,
             gamma=0.99, pi_lr=3e-4, vf_lr=1e-3, clip_ratio=0.2,
             train_pi_iters=80, train_v_iters=80, lam=0.97, target_kl=0.01,
             epochs=100, steps_per_epoch=2000, hidden_size=256):
         super().__init__(config, env, logger_kwargs,
-                         seed, gamma, pi_lr, save_freq)
+                         seed, gamma, pi_lr)
 
         self.lmbda = lam
         self.epochs = epochs
