@@ -11,7 +11,7 @@ SEEDS=(2)
 DATASET=omniglot
 N=1
 K=20
-DATASET_DIR=/home/rob/Git/meta-fsl-nas/data
+DATASET_DIR=/home/TUE/20184291/meta-fsl-nas/data
 EVAL_FREQ=25
 
 AGENT=ppo
