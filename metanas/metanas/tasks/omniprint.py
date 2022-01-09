@@ -49,7 +49,7 @@ def omniprint(folder, shots, ways, shuffle=True, test_shots=None,
 
 
 class OmniPrint(CombinationMetaDataset):
-        """
+    """
     The OmniPrint dataset [1] based on [2]. A synthetic generated dataset
     of 1409 classes and 935 different fonts. Moreover, the dataset consists of
     5 different splits increased synthetic noise.
@@ -83,8 +83,8 @@ class OmniPrint(CombinationMetaDataset):
         `meta_val` and `meta_test` if all three are set to `False`.
 
     print_split : string in {'meta1', 'meta2', 'meta3', 'meta4, 'meta5'}
-	(default: `None`)
-		The string value is mapped to the given OmniPrint split defined in [1].
+    (default: `None`)
+        The string value is mapped to the given OmniPrint split defined in [1].
         The higher the meta split the more synthetic noise is added to the images
         (raises an error when no print_split is defined).
 
@@ -127,7 +127,8 @@ class OmniPrint(CombinationMetaDataset):
            concept learning through probabilistic program induction. Science, 350(6266),
            1332-1338 (http://www.sciencemag.org/content/350/6266/1332.short)
 
-	"""
+    """
+
     def __init__(self, root, num_classes_per_task=None, meta_train=False,
                  meta_val=False, meta_test=False, meta_split=None,
                  transform=None, target_transform=None, dataset_transform=None,
