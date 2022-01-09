@@ -159,17 +159,30 @@ class Darts:
             if a_task_lr_scheduler is not None:
                 a_task_lr_scheduler.step()
 
-            train(
-                task,
-                self.model,
-                self.architect,
-                self.w_optim,
-                self.a_optim,
-                lr,
-                global_progress,
-                self.config,
-                warm_up,
-            )
+            if self.config.use_tse_darts:
+                tse_train(
+                    task,
+                    self.model,
+                    self.architect,
+                    self.w_optim,
+                    self.a_optim,
+                    lr,
+                    global_progress,
+                    self.config,
+                    warm_up,
+                )
+            else:
+                train(
+                    task,
+                    self.model,
+                    self.architect,
+                    self.w_optim,
+                    self.a_optim,
+                    lr,
+                    global_progress,
+                    self.config,
+                    warm_up,
+                )
 
             if (
                 model_has_normalizer
@@ -287,6 +300,68 @@ class Darts:
         return task_info
 
 
+def tse_train(
+    task,
+    model,
+    architect,
+    w_optim,
+    alpha_optim,
+    lr,
+    global_progress,
+    config,
+    warm_up=False,
+):
+    model.train()
+
+    model.zero_grad()
+    model_init = copy.deepcopy(model.state_dict())
+
+    # No unrolling loop for T=100, as this loop would hugely increase
+    # the computational cost in few-shot setting.
+
+    for step, (train_X, train_y) in enumerate(task.train_loader):
+        train_X, train_y = train_X.to(
+            config.device), train_y.to(config.device)
+
+        # Step 1 of Algorithm 3 - do the unrolling over 100 steps to
+        # collect TSE gradient
+        base_loss = model.loss(train_X, train_y)
+        base_loss.backward()
+
+        w_optim.step()  # Train the weights during unrolling as normal,
+        # but the architecture gradients are not zeroed during the unrolling
+        w_optim.zero_grad()
+
+    # Step 2 of Algorithm 3 - update the architecture encoding using
+    # accumulated gradients
+    if not warm_up:
+        alpha_optim.step()
+        alpha_optim.zero_grad()  # Reset to get ready for new unrolling
+
+        # Temporary backup for new architecture encoding
+        new_arch_params = copy.deepcopy(model._alphas)
+
+        # Old weights are loaded, which also reverts the architecture encoding
+        model.load_state_dict(model_init)
+        for(_, p1), (_, p2) in zip(model._alphas, new_arch_params):
+            p1.data = p2.data
+
+        # Step 3 of Algorithm 3 - training weights after updating the
+        # architecture encoding
+        for step, (train_X, train_y) in enumerate(task.train_loader):
+            train_X, train_y = train_X.to(
+                config.device), train_y.to(config.device)
+            base_loss = model.loss(train_X, train_y)
+            base_loss.backward()
+            w_optim.step()
+
+            # Apply grad clipping?
+            # nn.utils.clip_grad_norm_(model.weights(), config.w_grad_clip)
+
+            w_optim.zero_grad()
+            alpha_optim.zero_grad()
+
+
 def train(
     task,
     model,
@@ -326,6 +401,66 @@ def train(
         loss.backward()
         nn.utils.clip_grad_norm_(model.weights(), config.w_grad_clip)
         w_optim.step()
+
+
+def tse_train(
+
+    task,
+    model,
+    architect,
+    w_optim,
+    alpha_optim,
+    lr,
+    global_progress,
+    config,
+    warm_up=False,
+):
+    model.train()
+
+    # No unrolling loop for T=100, as this loop would hugely increase
+    # the computational cost in few-shot setting.
+
+    model.zero_grad()
+    model_init = copy.deepcopy(model.state_dict())
+
+    for step, (train_X, train_y) in enumerate(task.train_loader):
+        train_X, train_y = train_X.to(
+            config.device), train_y.to(config.device)
+
+        # Step 1 of Algorithm 3 - collect TSE gradient
+        base_loss = model.loss(train_X, train_y)
+        base_loss.backward()
+
+        w_optim.step()  # Train the weights during unrolling as normal,
+        # but the architecture gradients are not zeroed during the unrolling
+        w_optim.zero_grad()
+
+    # Step 2 of Algorithm 3 - update the architecture encoding using
+    # accumulated gradients
+    if not warm_up:
+        alpha_optim.step()
+        alpha_optim.zero_grad()  # Reset to get ready for new unrolling
+        w_optim.zero_grad()
+
+        # Temporary backup for new architecture encoding
+        new_arch_params = copy.deepcopy(model._alphas)
+
+        # Old weights are loaded, which also reverts the architecture encoding
+        model.load_state_dict(model_init)
+        for(_, p1), (_, p2) in zip(model._alphas, new_arch_params):
+            p1.data = p2.data
+
+        # Step 3 of Algorithm 3 - training weights after updating the
+        # architecture encoding
+        for step, (train_X, train_y) in enumerate(task.train_loader):
+            train_X, train_y = train_X.to(
+                config.device), train_y.to(config.device)
+            base_loss = model.loss(train_X, train_y)
+            base_loss.backward()
+            w_optim.step()
+
+            w_optim.zero_grad()
+            alpha_optim.zero_grad()
 
 
 class Architect:

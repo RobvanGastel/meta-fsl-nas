@@ -131,7 +131,7 @@ def set_rl_hyperparameters(config):
     config.logger_kwargs = setup_logger_kwargs(config.path,
                                                seed=config.seed)
     config.count_trajectories = True
-    config.number_of_trajectories = 30
+    config.number_of_trajectories = 50
     config.num_test_episodes = 5
 
     # DARTS estimation
@@ -141,8 +141,11 @@ def set_rl_hyperparameters(config):
     config.exploration_sampling = config.agent_exploration
 
     # Configure reward range
-    config.max_rew = 2.0
-    config.min_rew = -0.10
+    if bool(config.env_min_rew) ^ bool(config.env_max_rew):
+        raise RuntimeError("Reward range is not defined.")
+
+    config.max_rew = config.env_max_rew
+    config.min_rew = config.env_min_rew
 
     # Graph walk logging
     config.graph_walk_index = config.start_epoch
@@ -160,7 +163,6 @@ def set_rl_hyperparameters(config):
         config.agent_batch_size = 10
         config.agent_update_freq = 10
 
-        config.save_freq = 10
         config.replay_size = int(1e6)
     elif config.agent != "random":
         raise RuntimeError(f"No hp parameters for {config.agent} agent")

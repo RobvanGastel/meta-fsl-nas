@@ -19,7 +19,6 @@ from metanas.utils import utils
 
 from metanas.utils.cosine_power_annealing import cosine_power_annealing
 from metanas.meta_optimizer.agents.Random.random import RandomAgent
-from metanas.meta_optimizer.agents.SAC.rl2_sac import SAC
 from metanas.meta_optimizer.agents.PPO.rl2_ppo import PPO
 from metanas.env.nas_env import NasEnv
 
@@ -74,11 +73,23 @@ def meta_architecture_search(
     else:
         print("Not using hp_setting.")
 
+    # Primitives
+    if config.primitives_type == "fewshot":
+        config.primitives = gt.PRIMITIVES_FEWSHOT
+    elif config.primitives_type == "nasbench201":
+        config.primitives = gt.PRIMITIVES_NAS_BENCH_201
+    else:
+        raise RuntimeError(
+            f"This {config.primitives_type} set is not supported.")
+
+    # task distribution
     if config.use_torchmeta_loader:
         from metanas.tasks.torchmeta_loader import (
             OmniglotFewShot,
             MiniImageNetFewShot as miniImageNetFewShot,
-            TripleMNISTFewShot
+            TripleMNISTFewShot,
+            OmniPrintFewShot,
+            OmniPrintDomainAdaptationFewShot
         )
     else:
         raise RuntimeError("Other data loaders deprecated.")
@@ -89,22 +100,25 @@ def meta_architecture_search(
         task_distribution_class = miniImageNetFewShot
     elif config.dataset == "triplemnist":
         task_distribution_class = TripleMNISTFewShot
+    elif config.dataset == "omniprint":
+        task_distribution_class = OmniPrintFewShot
     else:
         raise RuntimeError(f"Dataset {config.dataset} is not supported.")
 
-    if config.primitives_type == "fewshot":
-        config.primitives = gt.PRIMITIVES_FEWSHOT
-    elif config.primitives_type == "nasbench201":
-        config.primitives = gt.PRIMITIVES_NAS_BENCH_201
-    else:
-        raise RuntimeError(
-            f"This f{config.primitives_type} set is not supported.")
+    if config.use_domain_adaptation and config.dataset == "omniprint":
+        if config.source_domain is None and config.target_domain is None:
+            raise RuntimeError("Source and/or target domain not defined")
 
-    # task distribution
-    # Adjusted to download=True, to force the download, this doesn't
-    # do any harm as the download will never retrigger.
-    task_distribution = task_distribution_class(
-        config, download=True)
+        task_distribution = OmniPrintDomainAdaptationFewShot(
+            config, source_domain=config.source_domain,
+            target_domain=config.target_domain,
+            download=True)
+    elif config.use_domain_adaptation:
+        raise RuntimeError(
+            f"Dataset {config.dataset} is not supported.")
+    else:
+        task_distribution = task_distribution_class(
+            config, download=True)
 
     # meta model
     normalizer = _init_alpha_normalizer(
@@ -126,7 +140,7 @@ def meta_architecture_search(
 
     # Meta-RL agent
     config = utils.set_rl_hyperparameters(config)
-    meta_rl_agent = _init_meta_rl_agent(config, meta_model)
+    agent = _init_meta_rl_agent(config, meta_model)
 
     # load pretrained model
     if config.model_path is not None:
@@ -151,7 +165,7 @@ def meta_architecture_search(
             task_distribution,
             task_optimizer,
             meta_optimizer,
-            meta_rl_agent,
+            agent,
             train_info,
         )
 
@@ -162,7 +176,7 @@ def meta_architecture_search(
 
     # run the evaluation
     config, alpha_logger, sparse_params = evaluate(
-        config, meta_model, task_distribution, task_optimizer
+        config, meta_model, task_distribution, task_optimizer, agent
     )
 
     # save results
@@ -171,10 +185,11 @@ def meta_architecture_search(
         "alphas": [alpha for alpha in meta_model.alphas()],
         "final_eval_test_accu": config.top1_logger_test.avg,
         "final_eval_test_loss": config.losses_logger_test.avg,
-        # "alpha_logger": alpha_logger,
-        # "sparse_params_logger": sparse_params,
+        "alpha_logger": alpha_logger,
+        "sparse_params_logger": sparse_params,
     }
     experiment.update(train_info)
+
     prefix = config.eval_prefix
     pickle_to_file(experiment, os.path.join(
         config.path, prefix + "experiment.pickle"))
@@ -186,7 +201,11 @@ def _init_meta_rl_agent(config, meta_model):
     # Environment to set shapes and sizes
     env_normal = NasEnv(config, meta_model,
                         cell_type="normal",
-                        reward_estimation=config.use_rew_estimation)
+                        reward_estimation=config.use_metad2a_estimation)
+
+    # If one of the model path is undefined raise error
+    if bool(config.agent_model_vars) ^ bool(config.agent_model):
+        raise RuntimeError("One of the agent model paths are undefined.")
 
     if config.agent == "random":
         agent = RandomAgent(config,
@@ -195,49 +214,73 @@ def _init_meta_rl_agent(config, meta_model):
                             steps_per_epoch=config.agent_steps_per_trial,
                             num_test_episodes=config.num_test_episodes,
                             logger_kwargs=config.logger_kwargs)
-    elif config.agent == "SAC":
-        ac_kwargs = dict(hidden_size=[config.agent_hidden_size]*2)
-
-        # TODO: Current parameters out-dated, use # episodes per trial
-        # env passed to set shapes of the network
-        agent = SAC(config, env_normal, ac_kwargs=ac_kwargs,
-                    gamma=config.gamma,
-                    polyak=config.polyak,
-                    lr=config.agent_lr,
-                    hidden_size=config.agent_hidden_size,
-                    logger_kwargs=config.logger_kwargs,
-                    epochs=config.agent_trials_per_mdp,
-                    steps_per_epoch=config.agent_steps_per_trial,
-                    start_steps=config.agent_start_steps,
-                    update_after=config.agent_update_after,
-                    update_every=config.agent_update_every,
-                    batch_size=config.agent_batch_size,
-                    replay_size=config.replay_size,
-                    seed=config.seed,
-                    save_freq=config.save_freq,
-                    num_test_episodes=config.num_test_episodes
-                    )
     elif config.agent == "ppo":
         agent = PPO(config,
                     env_normal,
                     logger_kwargs=config.logger_kwargs,
                     seed=config.seed,
-                    save_freq=config.save_freq,
                     gamma=config.gamma,
                     lr=config.agent_lr,
-                    # clip_ratio
-                    ppo_iter=4,
-                    lam=0.97,
+                    ppo_iter=config.agent_ppo_iter,
+                    lam=config.agent_lambda,
+                    update_freq=config.agent_update_freq,
                     epochs=config.agent_trials_per_mdp,  # 1 trial
                     hidden_size=config.agent_hidden_size,
-                    count_trajectories=True,
+                    count_trajectories=config.count_trajectories,
                     number_of_trajectories=config.number_of_trajectories,
-                    exploration_sampling=True)
+                    exploration_sampling=config.exploration_sampling,
+                    model_path=config.agent_model,
+                    vars_path=config.agent_model_vars)
 
     else:
         raise ValueError(f"The given agent {config.agent} is not supported.")
-
     return agent
+
+
+def meta_rl_optimization(
+        config, task, env_normal, env_reduce, agent,
+        meta_state, meta_model, meta_epoch, test_phase=False):
+    """TODO: Implement parallel environment solving
+    """
+    # # Set few-shot task
+    env_normal.set_task(task, meta_state, test_phase)
+    env_reduce.set_task(task, meta_state, test_phase)
+
+    # Now optimize alphas for better initialization
+    agent.train_agent(env_normal)
+    task_info = agent.train_agent(env_reduce)
+
+    # Now, save the meta-RL model
+    # Save optimizer and networks with variables
+    if (meta_epoch % config.print_freq == 0) or \
+            (meta_epoch == config.meta_epochs) and not test_phase:
+        vars = {"steps": agent.global_steps,
+                "test_steps": agent.global_test_steps, "epoch": agent.current_epoch}
+        agent.logger.save_state(vars, meta_epoch)
+
+    # Update the meta_model for task-learner or meta update
+    if meta_epoch <= config.warm_up_epochs:
+        meta_model.load_state_dict(meta_state)
+    else:
+        if not config.use_meta_model:
+            normal_alphas = env_normal.get_max_alphas()
+            reduce_alphas = env_reduce.get_max_alphas()
+
+            meta_model.alpha_normal = nn.ParameterList()
+            meta_model.alpha_reduce = nn.ParameterList()
+
+            for n_alpha, r_alpha in zip(normal_alphas, reduce_alphas):
+                meta_model.alpha_normal.append(nn.Parameter(n_alpha))
+                meta_model.alpha_reduce.append(nn.Parameter(r_alpha))
+        else:
+            max_meta_state = env_reduce.get_max_meta_model()
+            meta_model.load_state_dict(max_meta_state)
+
+    # Set task_info to None for metaD2A
+    if config.use_metad2a_estimation:
+        task_info = None
+
+    return task_info, meta_model
 
 
 def _init_alpha_normalizer(name, task_train_steps, t_max, t_min,
@@ -444,7 +487,7 @@ def train(
     task_distribution,
     task_optimizer,
     meta_optimizer,
-    meta_rl_agent,
+    agent,
     train_info=None
 ):
     """Meta-training loop
@@ -456,7 +499,7 @@ def train(
         task_optimizer: A pytorch optimizer for task training
         meta_optimizer: A pytorch optimizer for meta training
         normalizer: To be able to reinit the task optimizer for staging
-        meta_rl_agent: A Meta-RL agent for meta training
+        agent: A Meta-RL agent for meta training
         train_info: Dictionary that is added to the experiment.pickle
             file in addition to training internal data.
 
@@ -513,10 +556,10 @@ def train(
     # Environment to learn reduction and normal cell
     env_normal = NasEnv(config, meta_model,
                         cell_type="normal",
-                        reward_estimation=config.use_rew_estimation)
+                        reward_estimation=config.use_metad2a_estimation)
     env_reduce = NasEnv(config, meta_model,
                         cell_type="reduce",
-                        reward_estimation=config.use_rew_estimation)
+                        reward_estimation=config.use_metad2a_estimation)
 
     for meta_epoch in range(config.start_epoch, config.meta_epochs + 1):
 
@@ -537,44 +580,34 @@ def train(
         # Each task starts with the current meta state
         meta_state = copy.deepcopy(meta_model.state_dict())
         global_progress = f"[Meta-Epoch {meta_epoch:2d}/{config.meta_epochs}]"
-
         task_infos = []
+
         time_bs = time.time()
         for task in meta_train_batch:
 
-            # Set few-shot task
-            env_normal.set_task(task, meta_state)
-            env_reduce.set_task(task, meta_state)
+            # Meta-RL optimization
+            task_info, meta_model = meta_rl_optimization(
+                config, task, env_normal, env_reduce, agent,
+                meta_state, meta_model, meta_epoch, test_phase=False)
 
-            # Now optimize alphas for better initialization
-            meta_rl_agent.train_agent(env_normal)
-            meta_rl_agent.train_agent(env_reduce)
-            # task_info = meta_rl_agent.train_agent(env_reduce)
+            if task_info is not None:
+                # Use information of the training during the meta-RL loop.
+                task_infos += [task_info]
 
-            # Obtain better meta_model state for task-learning
-            # and set.
-            normal_alphas = env_normal.get_max_meta_model()
-            reduce_alphas = env_reduce.get_max_meta_model()
-
-            meta_model.alpha_normal = nn.ParameterList()
-            meta_model.alpha_reduce = nn.ParameterList()
-
-            for n_alpha, r_alpha in zip(normal_alphas, reduce_alphas):
-                meta_model.alpha_normal.append(nn.Parameter(n_alpha))
-                meta_model.alpha_reduce.append(nn.Parameter(r_alpha))
-
-            # task_infos += [
-            #     task_info
-            # ]
-
-            task_optimizer.step(
-                task, epoch=meta_epoch,
-                global_progress=global_progress
-            )
+                config.top1_logger.update(task_info.top1, 1)
+                config.losses_logger.update(task_info.loss, 1)
+            else:
+                # Train task-learner with max alphas from the meta-RL loop,
+                # on metaD2A reward estimation.
+                task_infos += [
+                    task_optimizer.step(
+                        task, epoch=meta_epoch,
+                        global_progress=global_progress
+                    )
+                ]
             meta_model.load_state_dict(meta_state)
 
         time_be = time.time()
-
         batch_time.update(time_be - time_bs)
 
         train_test_loss.append(config.losses_logger.avg)
@@ -606,9 +639,7 @@ def train(
             )
 
         # meta testing every config.eval_freq epochs
-        # meta test eval + backup
-        if False:
-            # if meta_epoch % config.eval_freq == 0:
+        if meta_epoch % config.eval_freq == 0:
             meta_test_batch = task_distribution.sample_meta_test()
 
             # Each task starts with the current meta state
@@ -625,41 +656,31 @@ def train(
             global_progress = f"[Meta-Epoch {meta_epoch:2d}/{config.meta_epochs}]"
 
             task_infos = []
-            for task in meta_test_batch:
-                # Set few-shot task
-                env_normal.set_task(task, meta_state)
-                env_reduce.set_task(task, meta_state)
+            for task in meta_test_batch:  # [0]]:
 
-                # Now optimize alphas for better initialization
-                meta_rl_agent.train_agent(env_normal)
-                meta_rl_agent.train_agent(env_reduce)
+                # Meta-RL optimization
+                task_info, meta_model = meta_rl_optimization(
+                    config, task, env_normal, env_reduce, agent,
+                    meta_state, meta_model, meta_epoch, test_phase=True)
 
-                # # In warm-up don't change the alphas
-                if meta_epoch <= config.warm_up_epochs:
-                    meta_model.load_state_dict(meta_state)
+                # Train task-learner with max alphas from the meta-RL loop,
+                # on metaD2A reward estimation.
+                if task_info is not None:
+                    task_infos += [task_info]
+
+                    config.top1_logger_test.update(task_info.top1, 1)
+                    config.losses_logger_test.update(task_info.loss, 1)
+
                 else:
-                    # Obtain better meta_model state for task-learning
-                    # and set.
-                    normal_alphas = env_normal.get_max_alphas()
-                    reduce_alphas = env_reduce.get_max_alphas()
-
-                    meta_model.alpha_normal = nn.ParameterList()
-                    meta_model.alpha_reduce = nn.ParameterList()
-
-                    for n_alpha, r_alpha in zip(normal_alphas, reduce_alphas):
-                        meta_model.alpha_normal.append(nn.Parameter(n_alpha))
-                        meta_model.alpha_reduce.append(nn.Parameter(r_alpha))
-
-                task_infos += [
-                    task_optimizer.step(
-                        task,
-                        epoch=meta_epoch,
-                        global_progress=global_progress,
-                        test_phase=True,
-                        num_of_skip_connections=config.limit_skip_connections,
-                    )
-                ]
-
+                    task_infos += [
+                        task_optimizer.step(
+                            task,
+                            epoch=meta_epoch,
+                            global_progress=global_progress,
+                            test_phase=True,
+                            num_of_skip_connections=config.limit_skip_connections,
+                        )
+                    ]
                 meta_model.load_state_dict(meta_state)
 
             config.logger.info(
@@ -743,7 +764,7 @@ def pickle_to_file(var, file_path):
         pickle.dump(var, handle)
 
 
-def evaluate(config, meta_model, task_distribution, task_optimizer):
+def evaluate(config, meta_model, task_distribution, task_optimizer, agent):
     """Meta-testing
 
     Returns:
@@ -781,27 +802,48 @@ def evaluate(config, meta_model, task_distribution, task_optimizer):
     else:
         alpha_logger = None
 
+    # Environment to learn reduction and normal cell
+    env_normal = NasEnv(config, meta_model,
+                        cell_type="normal",
+                        reward_estimation=config.use_metad2a_estimation)
+    env_reduce = NasEnv(config, meta_model,
+                        cell_type="reduce",
+                        reward_estimation=config.use_metad2a_estimation)
+
     for eval_epoch in range(config.eval_epochs):
 
         meta_test_batch = task_distribution.sample_meta_test()
-
         global_progress = f"[Eval-Epoch {eval_epoch:2d}/{config.eval_epochs}]"
         task_infos = []
 
         for task in meta_test_batch:
-            time_ts = time.time()
-            task_infos += [
-                task_optimizer.step(
-                    task,
-                    epoch=config.meta_epochs,
-                    global_progress=global_progress,
-                    test_phase=True,
-                    alpha_logger=alpha_logger,
-                    sparsify_input_alphas=config.sparsify_input_alphas,
-                    num_of_skip_connections=config.limit_skip_connections
-                )
-            ]
-            time_te = time.time()
+
+            # Meta-RL optimization
+            task_info, meta_model = meta_rl_optimization(
+                config, task, env_normal, env_reduce, agent,
+                meta_state, config.meta_epochs, eval_epoch, test_phase=False)
+
+            if task_info is not None:
+                # Use information of the training during the meta-RL loop.
+                task_infos += [task_info]
+
+                config.top1_logger_test.update(task_info.top1, 1)
+                config.losses_logger_test.update(task_info.loss, 1)
+            else:
+                # Train task-learner with max alphas from the meta-RL loop,
+                # on metaD2A reward estimation.
+                task_infos += [
+                    task_optimizer.step(
+                        task,
+                        epoch=config.meta_epochs,
+                        global_progress=global_progress,
+                        test_phase=True,
+                        alpha_logger=alpha_logger,
+                        sparsify_input_alphas=config.sparsify_input_alphas,
+                        num_of_skip_connections=config.limit_skip_connections
+                    )
+                ]
+
             # load meta state
             meta_model.load_state_dict(meta_state)
 
@@ -861,6 +903,8 @@ if __name__ == "__main__":
     parser.add_argument("--use_hp_setting", type=int, default=0)
 
     ################################
+
+    # Dataset parameters
     parser.add_argument("--workers", type=int, default=4, help="# of workers")
     parser.add_argument("--print_freq", type=int,
                         default=50, help="print frequency")
@@ -869,8 +913,31 @@ if __name__ == "__main__":
         action="store_true",
         help="Use torchmeta for data loading.",
     )
-    parser.add_argument("--dataset", default="omniglot",
-                        help="omniglot / miniimagenet")
+    parser.add_argument(
+        "--dataset", default="omniglot",
+        help="omniglot / miniimagenet / triplemnist / omniprint")
+
+    parser.add_argument(
+        "--use_domain_adaptation",
+        action="store_true",
+        help="Perform domain adaptation experiments"
+    )
+
+    parser.add_argument(
+        "--print_split",
+        default="meta1",
+        help="For the specific omniprint split"
+    )
+
+    parser.add_argument(
+        "--source_domain",
+        default=None, help="meta1 / meta2 / meta3 / meta4 / meta5"
+    )
+
+    parser.add_argument(
+        "--target_domain",
+        default=None, help="meta1 / meta2 / meta3 / meta4 / meta5"
+    )
 
     parser.add_argument(
         "--use_vinyals_split",
@@ -878,6 +945,7 @@ if __name__ == "__main__":
         help="Only relevant for Omniglot: Use the vinyals split. Requires the "
         "torchmeta data loading.",
     )
+
     parser.add_argument(
         "--gpus",
         default="0",
@@ -1056,7 +1124,7 @@ if __name__ == "__main__":
         help="Whether to use drop path also during meta testing.",
     )
 
-    # P-DARTS & SharpDARTS
+    # P-DARTS, SharpDARTS, TSE-DARTS configurations
     # Enabling both approaches, specificly for ablation study
     parser.add_argument(
         "--dropout_skip_connections",
@@ -1077,17 +1145,27 @@ if __name__ == "__main__":
     parser.add_argument("--darts_regularization", default="scalar",
                         help="Either scalar or max_w")
 
+    parser.add_argument("--use_cosine_power_annealing", action="store_true")
+
+    parser.add_argument("--use_tse_darts", default="store_true",
+                        help="Training Speed Estimation (TSE)")
+
+    # deprecated
+    # Currently fixed to 1 unrolling step due low amount of samples
+    # parser.add_argument("--tse_unrolling_steps", type=int, default=1)
+
+    # Architectures
     parser.add_argument("--primitives_type", default="fewshot",
                         help="Either fewshot, nasbench201")
 
-    parser.add_argument("--use_cosine_power_annealing", action="store_true")
-
-    # Architectures
     parser.add_argument("--init_channels", type=int, default=16)
+
     parser.add_argument("--layers", type=int, default=5,
                         help="# of layers (cells)")
+
     parser.add_argument("--nodes", type=int, default=3,
                         help="# of nodes per cell")
+
     parser.add_argument(
         "--use_hierarchical_alphas",
         action="store_true",
@@ -1155,36 +1233,48 @@ if __name__ == "__main__":
     parser.add_argument("--agent", default="random",
                         help="random / sac")
 
+    parser.add_argument("--agent_model", default=None,
+                        type=str, help="Path to pretrained model")
+
+    parser.add_argument("--agent_model_vars", default=None,
+                        type=str)
+
+    parser.add_argument("--agent_exploration", action="store_true")
+
     parser.add_argument("--agent_hidden_size",
                         type=int,
                         default=None)
 
-    parser.add_argument("--agent_update_after",
-                        type=int,
-                        default=1000)
-
-    parser.add_argument("--agent_update_every",
-                        type=int,
-                        default=1000)
-
+    # Environment settings
     parser.add_argument("--darts_estimation_steps",
                         type=int, default=7)
-    # config.darts_estimation_steps = 7
+
+    parser.add_argument("--use_env_random_start",
+                        action="store_true")
+
+    parser.add_argument("--env_min_rew", type=float, default=None)
+    parser.add_argument("--env_max_rew", type=float, default=None)
+
+    parser.add_argument("--use_meta_model",
+                        action="store_true")
 
     # MetaD2A settings
     # reward estimation for the RL environment
-    parser.add_argument("--rew_model_path",
-                        default='/home/rob/Git/meta-fsl-nas/metanas/results/predictor/predictor_max_corr.pt')
-    parser.add_argument("--rew_data_path",
-                        default='/home/rob/Git/meta-fsl-nas/data/predictor')
+    parser.add_argument(
+        "--rew_model_path",
+        default='/home/rob/Git/meta-fsl-nas/')
+    parser.add_argument(
+        "--rew_data_path",
+        default='/home/rob/Git/meta-fsl-nas/')
 
     parser.add_argument(
-        "--use_rew_estimation",
+        "--use_metad2a_estimation",
         action="store_true",
         help="Use meta_predictor for the env reward estimation")
 
     args = parser.parse_args()
 
+    # Fixed MetaD2A variables
     # num_samples in few-shot setting, n*k
     args.num_samples = 20
     # the graph data used, nas-bench-201
@@ -1192,6 +1282,7 @@ if __name__ == "__main__":
     args.nvt = 7
     args.hs = 512
     args.nz = 56
+    # End MetaD2A variables
 
     args.path = os.path.join(
         args.path, ""
