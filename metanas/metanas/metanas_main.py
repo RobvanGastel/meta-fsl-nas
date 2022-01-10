@@ -1252,6 +1252,9 @@ if __name__ == "__main__":
     parser.add_argument("--use_env_random_start",
                         action="store_true")
 
+    parser.add_argument("--env_encourage_exploration",
+                        action="store_true")
+
     parser.add_argument("--env_min_rew", type=float, default=None)
     parser.add_argument("--env_max_rew", type=float, default=None)
 

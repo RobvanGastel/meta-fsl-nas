@@ -140,12 +140,15 @@ def set_rl_hyperparameters(config):
     # E-RL2 sampling
     config.exploration_sampling = config.agent_exploration
 
+    # Environment variables
     # Configure reward range
     if bool(config.env_min_rew) ^ bool(config.env_max_rew):
         raise RuntimeError("Reward range is not defined.")
 
     config.max_rew = config.env_max_rew
     config.min_rew = config.env_min_rew
+
+    config.encourage_exploration = config.env_encourage_exploration
 
     # Graph walk logging
     config.graph_walk_index = config.start_epoch

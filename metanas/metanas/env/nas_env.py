@@ -106,7 +106,7 @@ class NasEnv(gym.Env):
         self.A_up = np.triu(self.A)
 
         # Initialize action space
-        # |A| + 2*|O| + 1, +1 for the termination
+        # |A| + 2*|O| + 1, +1 if termination action
         action_size = len(self.A) + 2*len(self. primitives)
         self.action_space = spaces.Discrete(action_size)
 
@@ -118,7 +118,7 @@ class NasEnv(gym.Env):
         self.max_ep_len = max_ep_len  # max_steps per episode
 
         # Reward range
-        self.encourage_exploration = True
+        self.encourage_exploration = config.encourage_exploration
         self.encourage_increase = 2.0
         self.encourage_decrease = 0.0
 
@@ -236,6 +236,8 @@ class NasEnv(gym.Env):
         Raises:
             RuntimeError: On passing invalid cell types
         """
+        start = time.time()
+
         s_idx = 0
 
         prev_alphas = copy.deepcopy(self.discrete_alphas)
@@ -318,6 +320,8 @@ class NasEnv(gym.Env):
                     np.hstack((self.A[j], np.ones((self.n_ops*2)))))
 
                 s_idx += 2
+        print(
+            f"Update the states of the environment: {int(time.time() - start)}")
 
         self.states = np.array(self.states)
         self.invalid_mask = np.array(self.invalid_mask)
@@ -349,6 +353,8 @@ class NasEnv(gym.Env):
         return torch.log(x) + C
 
     def increase_op(self, row_idx, edge_idx, op_idx, prob=0.6):
+        start = time.time()
+
         C = math.log(10.)
 
         # Set short-hands
@@ -381,13 +387,17 @@ class NasEnv(gym.Env):
                     self.meta_model.alpha_reduce[
                         row_idx][edge_idx] = self._inverse_softmax(
                         curr_edge, C)
-
+            print(f"increase op: {int(time.time() - start)")
             # True if state is mutated
             return True
+
+        print(f"increase op: {int(time.time() - start)")
         # False if no update occured
         return False
 
     def decrease_op(self, row_idx, edge_idx, op_idx, prob=0.6):
+        start = time.time()
+
         C = math.log(10.)
 
         # Set short-hands
@@ -420,7 +430,10 @@ class NasEnv(gym.Env):
                         curr_edge, C)
 
             # True if state is mutated
+            print(f"decrease op: {int(time.time() - start)")
             return True
+
+        print(f"decrease op: {int(time.time() - start)")
         # False if no update occured
         return False
 
@@ -521,6 +534,8 @@ class NasEnv(gym.Env):
 
     def _perform_action(self, action):
         """Perform the action on both the meta-model and local state"""
+
+        start = time.time()
 
         action_info = ""
         reward = 0.0
@@ -666,6 +681,7 @@ class NasEnv(gym.Env):
 
             action_info = f"Decrease alpha ({row_idx}, {edge_idx}, {action})"
 
+        print(f"perform action {int(time.time() - start)}")
         return action_info, reward, acc
 
     def compute_reward(self):
@@ -676,13 +692,17 @@ class NasEnv(gym.Env):
             reward = self.scale_reward(acc)
             return reward, acc
 
+        start = time.time()
         if self.reward_estimation:
             acc = self._meta_predictor_estimation(self.current_task)
+            print("metad2a estimation:", int(time.time() - start))
         else:
             if self.config.update_weights_and_alphas:
                 acc = self._darts_weight_alpha_estimation(self.current_task)
             else:
                 acc = self._darts_weight_estimation(self.current_task)
+
+            print("darts estimation:", int(time.time() - start))
 
         # Scale reward to (min_rew, max_rew) range, [-min, max]
         reward = self.scale_reward(acc)
