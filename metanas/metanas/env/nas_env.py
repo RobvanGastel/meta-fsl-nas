@@ -14,7 +14,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as models
 
-from metanas.task_optimizer.darts import Architect
+from metanas.task_optimizer.darts import CellArchitect
 from metanas.meta_predictor.meta_predictor import MetaPredictor
 import metanas.utils.genotypes as gt
 from metanas.utils import utils
@@ -67,25 +67,41 @@ class NasEnv(gym.Env):
             # DARTS estimation of the network is used
             self.task_train_steps = 0
 
-            self.w_optim = torch.optim.Adam(
-                self.meta_model.weights(),
-                lr=self.config.w_lr,
-                betas=(0.0, 0.999),
-                weight_decay=self.config.w_weight_decay,
-            )
+            if cell_type == "normal":
+                self.w_optim = torch.optim.Adam(
+                    self.meta_model.reduce_weights(),
+                    lr=self.config.w_lr,
+                    betas=(0.0, 0.999),
+                    weight_decay=self.config.w_weight_decay,
+                )
 
-            self.a_optim = torch.optim.Adam(
-                self.meta_model.alphas(),
-                self.config.alpha_lr,
-                betas=(0.0, 0.999),
-                weight_decay=self.config.alpha_weight_decay,
-            )
+                self.a_optim = torch.optim.Adam(
+                    self.meta_model.reduce_alphas(),
+                    self.config.alpha_lr,
+                    betas=(0.0, 0.999),
+                    weight_decay=self.config.alpha_weight_decay,
+                )
+            else:
+                self.w_optim = torch.optim.Adam(
+                    self.meta_model.reduce_weights(),
+                    lr=self.config.w_lr,
+                    betas=(0.0, 0.999),
+                    weight_decay=self.config.w_weight_decay,
+                )
 
-            self.architect = Architect(
+                self.a_optim = torch.optim.Adam(
+                    self.meta_model.reduce_alphas(),
+                    self.config.alpha_lr,
+                    betas=(0.0, 0.999),
+                    weight_decay=self.config.alpha_weight_decay,
+                )
+
+            self.architect = CellArchitect(
                 self.meta_model,
                 self.config.w_momentum,
                 self.config.w_weight_decay,
                 self.config.use_first_order_darts,
+                cell_type
             )
 
         # Episode step counter
@@ -236,8 +252,6 @@ class NasEnv(gym.Env):
         Raises:
             RuntimeError: On passing invalid cell types
         """
-        start = time.time()
-
         s_idx = 0
 
         prev_alphas = copy.deepcopy(self.discrete_alphas)
@@ -320,8 +334,6 @@ class NasEnv(gym.Env):
                     np.hstack((self.A[j], np.ones((self.n_ops*2)))))
 
                 s_idx += 2
-        print(
-            f"Update the states of the environment: {int(time.time() - start)}")
 
         self.states = np.array(self.states)
         self.invalid_mask = np.array(self.invalid_mask)
@@ -353,8 +365,6 @@ class NasEnv(gym.Env):
         return torch.log(x) + C
 
     def increase_op(self, row_idx, edge_idx, op_idx, prob=0.6):
-        start = time.time()
-
         C = math.log(10.)
 
         # Set short-hands
@@ -387,17 +397,13 @@ class NasEnv(gym.Env):
                     self.meta_model.alpha_reduce[
                         row_idx][edge_idx] = self._inverse_softmax(
                         curr_edge, C)
-            print(f"increase op: {int(time.time() - start)")
             # True if state is mutated
             return True
 
-        print(f"increase op: {int(time.time() - start)")
         # False if no update occured
         return False
 
     def decrease_op(self, row_idx, edge_idx, op_idx, prob=0.6):
-        start = time.time()
-
         C = math.log(10.)
 
         # Set short-hands
@@ -430,10 +436,8 @@ class NasEnv(gym.Env):
                         curr_edge, C)
 
             # True if state is mutated
-            print(f"decrease op: {int(time.time() - start)")
             return True
 
-        print(f"decrease op: {int(time.time() - start)")
         # False if no update occured
         return False
 
@@ -513,9 +517,11 @@ class NasEnv(gym.Env):
             "action_id": action,
             "action": action_info,
             "acc": acc,
-            "running_time": int(time.time() - start),
+            "running_time": time.time() - start,
             "illegal_edge_traversals": self.illegal_edge_traversals,
         }
+
+        # print(f"Step running time: {info_dict['running_time']}")
 
         # Final episode statistics
         if done:
@@ -534,8 +540,6 @@ class NasEnv(gym.Env):
 
     def _perform_action(self, action):
         """Perform the action on both the meta-model and local state"""
-
-        start = time.time()
 
         action_info = ""
         reward = 0.0
@@ -681,7 +685,6 @@ class NasEnv(gym.Env):
 
             action_info = f"Decrease alpha ({row_idx}, {edge_idx}, {action})"
 
-        print(f"perform action {int(time.time() - start)}")
         return action_info, reward, acc
 
     def compute_reward(self):
@@ -695,14 +698,15 @@ class NasEnv(gym.Env):
         start = time.time()
         if self.reward_estimation:
             acc = self._meta_predictor_estimation(self.current_task)
-            print("metad2a estimation:", int(time.time() - start))
         else:
-            if self.config.update_weights_and_alphas:
+            if self.config.update_weights_and_alphas and \
+                    not self.config.use_tse_darts:
                 acc = self._darts_weight_alpha_estimation(self.current_task)
+            elif self.config.use_tse_darts:
+                acc = self._tse_darts_weight_alpha_estimation(
+                    self.current_task)
             else:
                 acc = self._darts_weight_estimation(self.current_task)
-
-            print("darts estimation:", int(time.time() - start))
 
         # Scale reward to (min_rew, max_rew) range, [-min, max]
         reward = self.scale_reward(acc)
@@ -820,9 +824,7 @@ class NasEnv(gym.Env):
 
             # phase 2. architect step (alpha)
             self.a_optim.zero_grad()
-            if self.config.do_unrolled_architecture_steps:
-                self.architect.virtual_step(
-                    train_X, train_y, lr, self.w_optim)  # (calc w`)
+
             self.architect.backward(
                 train_X, train_y, val_X, val_y, lr, self.w_optim)
             self.a_optim.step()
@@ -833,8 +835,14 @@ class NasEnv(gym.Env):
 
             loss = self.meta_model.criterion(logits, train_y)
             loss.backward()
-            nn.utils.clip_grad_norm_(
-                self.meta_model.weights(), self.config.w_grad_clip)
+
+            if self.cell_type == "normal":
+                nn.utils.clip_grad_norm_(
+                    self.meta_model.normal_weights(), self.config.w_grad_clip)
+            else:
+                nn.utils.clip_grad_norm_(
+                    self.meta_model.reduce_weights(), self.config.w_grad_clip)
+
             self.w_optim.step()
 
             # Obtain accuracy with gradient step
@@ -895,12 +903,13 @@ class NasEnv(gym.Env):
         self.a_optim.zero_grad()  # Reset to get ready for new unrolling
         self.w_optim.zero_grad()
 
+        # TODO: Adjust
         # Temporary backup for new architecture encoding
-        new_arch_params = copy.deepcopy(self.meta_model._alphas)
+        new_arch_params = copy.deepcopy(self.meta_model.alpha_normal)
 
         # Old weights are loaded, which also reverts the architecture encoding
         self.meta_model.load_state_dict(model_init)
-        for(_, p1), (_, p2) in zip(self.meta_model._alphas, new_arch_params):
+        for p1, p2 in zip(self.meta_model.alpha_normal, new_arch_params):
             p1.data = p2.data
 
         # Step 3 of Algorithm 3 - training weights after updating the
@@ -952,7 +961,6 @@ class NasEnv(gym.Env):
             dropout_rate = self.dropout_stage * \
                 np.exp(-self.task_train_steps * self.scale_factor)
             self.meta_model.drop_out_skip_connections(dropout_rate)
-        self.task_train_steps += 1
 
         # Take w step scheduler step
         if self.w_task_lr_scheduler is not None:
@@ -970,16 +978,28 @@ class NasEnv(gym.Env):
             loss = self.meta_model.criterion(logits, train_y)
             loss.backward()
 
-            nn.utils.clip_grad_norm_(self.meta_model.weights(),
-                                     self.config.w_grad_clip)
+            if self.cell_type == "normal":
+                nn.utils.clip_grad_norm_(
+                    self.meta_model.normal_weights(), self.config.w_grad_clip)
+            else:
+                nn.utils.clip_grad_norm_(
+                    self.meta_model.reduce_weights(), self.config.w_grad_clip)
+            # nn.utils.clip_grad_norm_(self.meta_model.weights(),
+            #                          self.config.w_grad_clip)
             self.w_optim.step()
 
             # Obtain accuracy with gradient step
             logits = self.meta_model(train_X, sparsify_input_alphas=True)
             prec1, _ = utils.accuracy(logits, train_y, topk=(1, 5))
 
-        if self.model_has_normalizer:
+        if (
+            self.model_has_normalizer
+            and self.task_train_steps < (self.arch_adap_steps - 1)
+        ):
             self.meta_model.normalizer["params"]["curr_step"] += 1
+
+        # Step increment
+        self.task_train_steps += 1
 
         acc = prec1.item()
         return acc

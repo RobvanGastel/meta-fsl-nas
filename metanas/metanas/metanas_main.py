@@ -6,7 +6,6 @@ import numpy as np
 import pickle
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from collections import OrderedDict
 
 from metanas.meta_optimizer.reptile import NAS_Reptile
@@ -198,14 +197,14 @@ def meta_architecture_search(
 
 
 def _init_meta_rl_agent(config, meta_model):
-    # Environment to set shapes and sizes
+    # Dummy environment to set shapes and sizes
     env_normal = NasEnv(config, meta_model,
                         cell_type="normal",
                         reward_estimation=config.use_metad2a_estimation)
 
     # If one of the model path is undefined raise error
     if bool(config.agent_model_vars) ^ bool(config.agent_model):
-        raise RuntimeError("One of the agent model paths are undefined.")
+        raise RuntimeError("One of the agent model paths is undefined.")
 
     if config.agent == "random":
         agent = RandomAgent(config,
@@ -240,8 +239,7 @@ def _init_meta_rl_agent(config, meta_model):
 def meta_rl_optimization(
         config, task, env_normal, env_reduce, agent,
         meta_state, meta_model, meta_epoch, test_phase=False):
-    """TODO: Implement parallel environment solving
-    """
+
     # # Set few-shot task
     env_normal.set_task(task, meta_state, test_phase)
     env_reduce.set_task(task, meta_state, test_phase)
@@ -254,9 +252,10 @@ def meta_rl_optimization(
     # Save optimizer and networks with variables
     if (meta_epoch % config.print_freq == 0) or \
             (meta_epoch == config.meta_epochs) and not test_phase:
-        vars = {"steps": agent.global_steps,
-                "test_steps": agent.global_test_steps, "epoch": agent.current_epoch}
-        agent.logger.save_state(vars, meta_epoch)
+        agent_vars = {"steps": agent.global_steps,
+                      "test_steps": agent.global_test_steps,
+                      "epoch": agent.current_epoch}
+        agent.logger.save_state(agent_vars, meta_epoch)
 
     # Update the meta_model for task-learner or meta update
     if meta_epoch <= config.warm_up_epochs:
@@ -656,7 +655,7 @@ def train(
             global_progress = f"[Meta-Epoch {meta_epoch:2d}/{config.meta_epochs}]"
 
             task_infos = []
-            for task in meta_test_batch:  # [0]]:
+            for task in meta_test_batch:
 
                 # Meta-RL optimization
                 task_info, meta_model = meta_rl_optimization(
@@ -1135,7 +1134,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--use_limit_skip_connections",
         action="store_true",
-        help="Change skip-connections to M in final gene",
+        help="Change skip-connections to M in final gene"
     )
 
     # Discovered cells are allowed to keep M = 2, skip connections.
@@ -1147,12 +1146,8 @@ if __name__ == "__main__":
 
     parser.add_argument("--use_cosine_power_annealing", action="store_true")
 
-    parser.add_argument("--use_tse_darts", default="store_true",
+    parser.add_argument("--use_tse_darts", action="store_true",
                         help="Training Speed Estimation (TSE)")
-
-    # deprecated
-    # Currently fixed to 1 unrolling step due low amount of samples
-    # parser.add_argument("--tse_unrolling_steps", type=int, default=1)
 
     # Architectures
     parser.add_argument("--primitives_type", default="fewshot",
@@ -1261,11 +1256,9 @@ if __name__ == "__main__":
     parser.add_argument("--use_meta_model",
                         action="store_true")
 
-    # MetaD2A settings
-    # reward estimation for the RL environment
+    # MetaD2A reward estimation settings
     parser.add_argument(
-        "--rew_model_path",
-        default='/home/rob/Git/meta-fsl-nas/')
+        "--rew_model_path", default='/home/rob/Git/meta-fsl-nas/')
     parser.add_argument(
         "--rew_data_path",
         default='/home/rob/Git/meta-fsl-nas/')
@@ -1285,7 +1278,6 @@ if __name__ == "__main__":
     args.nvt = 7
     args.hs = 512
     args.nz = 56
-    # End MetaD2A variables
 
     args.path = os.path.join(
         args.path, ""
