@@ -290,12 +290,12 @@ def meta_rl_optimization(
 
     # Now, save the meta-RL model
     # Save optimizer and networks with variables
-    if (meta_epoch % config.print_freq == 0) or \
-            (meta_epoch == config.meta_epochs) and not test_phase:
-        agent_vars = {"steps": agent.global_steps,
-                      "test_steps": agent.global_test_steps,
-                      "epoch": agent.current_epoch}
-        agent.logger.save_state(agent_vars, meta_epoch)
+    # if (meta_epoch % config.print_freq == 0) or \
+    #         (meta_epoch == config.meta_epochs) and not test_phase:
+    #     agent_vars = {"steps": agent.global_steps,
+    #                   "test_steps": agent.global_test_steps,
+    #                   "epoch": agent.current_epoch}
+    #     agent.logger.save_state(agent_vars, meta_epoch)
 
     # Update the meta_model for task-learner or meta update
     if meta_epoch <= config.warm_up_epochs:
@@ -316,8 +316,8 @@ def meta_rl_optimization(
             meta_model.load_state_dict(max_meta_state)
 
     # Set task_info to None for metaD2A
-    if config.use_metad2a_estimation:
-        task_info = None
+    # if config.use_metad2a_estimation:
+    task_info = None
 
     return task_info, meta_model
 
