@@ -131,11 +131,11 @@ def set_rl_hyperparameters(config):
     config.logger_kwargs = setup_logger_kwargs(config.path,
                                                seed=config.seed)
     config.count_trajectories = True
-    config.number_of_trajectories = 30
+    config.number_of_trajectories = 15
     config.num_test_episodes = 5
 
     # DARTS estimation
-    config.update_weights_and_alphas = True
+    config.update_weights_and_alphas = False
 
     # E-RL2 sampling
     config.exploration_sampling = config.agent_exploration
@@ -164,7 +164,7 @@ def set_rl_hyperparameters(config):
 
         config.agent_trials_per_mdp = 1
         config.agent_batch_size = 10
-        config.agent_update_freq = 10
+        config.agent_update_freq = 5
 
         config.replay_size = int(1e6)
     elif config.agent != "random":

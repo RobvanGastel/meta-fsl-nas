@@ -4,9 +4,11 @@ import os
 import time
 import numpy as np
 import pickle
+from collections import OrderedDict
+
+import torch.multiprocessing as mp
 import torch
 import torch.nn as nn
-from collections import OrderedDict
 
 from metanas.meta_optimizer.reptile import NAS_Reptile
 from metanas.models.search_cnn import SearchCNNController
@@ -17,7 +19,7 @@ from metanas.utils import genotypes as gt
 from metanas.utils import utils
 
 from metanas.utils.cosine_power_annealing import cosine_power_annealing
-from metanas.meta_optimizer.agents.Random.random import RandomAgent
+from metanas.meta_optimizer.agents.Random.mp_random import RandomAgent, EpisodeFinished
 from metanas.meta_optimizer.agents.PPO.rl2_ppo import PPO
 from metanas.env.nas_env import NasEnv
 
@@ -51,6 +53,8 @@ def meta_architecture_search(
 
     # Find mistakes in gradient computation
     torch.autograd.set_detect_anomaly(True)
+
+    mp.set_start_method('spawn')
 
     # set default gpu device id
     torch.cuda.set_device(config.gpus[0])
@@ -128,6 +132,8 @@ def meta_architecture_search(
         config.normalizer_temp_anneal_mode,
     )
     meta_model = _build_model(config, task_distribution, normalizer)
+    meta_model.share_memory()
+    print(sum(p.numel() for p in meta_model.parameters() if p.requires_grad))
 
     # task & meta optimizer
     config, meta_optimizer = _init_meta_optimizer(
@@ -244,9 +250,43 @@ def meta_rl_optimization(
     env_normal.set_task(task, meta_state, test_phase)
     env_reduce.set_task(task, meta_state, test_phase)
 
-    # Now optimize alphas for better initialization
-    agent.train_agent(env_normal)
-    task_info = agent.train_agent(env_reduce)
+    pipes = []
+    agents = []
+    start = time.time()
+
+    terminatedAgents = [False, False]
+
+    # Set meta-model share_memory()
+    for agent_id, env in enumerate([env_normal, env_reduce]):
+        p_start, p_end = mp.Pipe()
+        agent = RandomAgent(str(agent_id), p_end, env)
+        agent.start()
+
+        agents.append(agent)
+        pipes.append(p_start)
+
+    # starting training loop
+    while True:
+        for i, conn in enumerate(pipes):
+            if conn.poll():
+                message = conn.recv()
+
+                if type(message).__name__ == "EpisodeFinished":
+                    print(f"Terminated agent {i}")
+                    terminatedAgents[i] = True
+
+        if False not in terminatedAgents:
+            break
+
+    for agent in agents:
+        agent.terminate()
+
+    time_delta = (time.time() - start)
+    config.logger.info(f"time: {time_delta/60}")
+
+    config.logger.info("Done")
+    # agent.train_agent(env_normal)
+    # task_info = agent.train_agent(env_reduce)
 
     # Now, save the meta-RL model
     # Save optimizer and networks with variables

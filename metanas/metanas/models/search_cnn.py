@@ -179,9 +179,18 @@ class SearchCNNController(nn.Module):
 
         # setup alphas list
         self._alphas = []
+        self._normal_alphas = []
+        self._reduce_alphas = []
         for n, p in self.named_parameters():
             if "alpha" in n:
                 self._alphas.append((n, p))
+
+            if "alpha_normal" in n:
+                self._normal_alphas.append((n, p))
+
+            if "alpha_reduce" in n:
+                self._reduce_alphas.append((n, p))
+
         print(f"Using dropout on skip-connections {dropout_skip_connections}")
         self.net = SearchCNN(
             C_in,
@@ -626,6 +635,30 @@ class SearchCNNController(nn.Module):
     def named_weights_with_net(self):
         return self.named_parameters()
 
+    def normal_weights(self):
+        params = list()
+        for _, cell in enumerate(self.net.cells):
+            if not cell.reduction:
+                p = cell.parameters()
+                params.extend(list(p))
+        return params
+
+    def reduce_weights(self):
+        params = list()
+        for _, cell in enumerate(self.net.cells):
+            if cell.reduction:
+                p = cell.parameters()
+                params.extend(list(p))
+        return params
+
+    def reduce_alphas(self):
+        for n, p in self._reduce_alphas:
+            yield p
+
+    def normal_alphas(self):
+        for n, p in self._normal_alphas:
+            yield p
+
     def alphas(self):
         for n, p in self._alphas:
             yield p
@@ -767,23 +800,23 @@ class SearchCNN(nn.Module):
         s0 = s1 = self.stem(x)
 
         # TODO: Make configurable
-        if sparsify_input_alphas:
+        # if sparsify_input_alphas:
 
-            # always sparsify edge alphas (keep only edge with max
-            # prob for each previous node)
-            weights_normal = sparsify_alphas(weights_normal)
-            weights_reduce = sparsify_alphas(weights_reduce)
+        #     # always sparsify edge alphas (keep only edge with max
+        #     # prob for each previous node)
+        #     weights_normal = sparsify_alphas(weights_normal)
+        #     weights_reduce = sparsify_alphas(weights_reduce)
 
-            if weights_in_normal is not None:
-                weights_in_normal = sparsify_hierarchical_alphas(
-                    weights_in_normal, sparsify_input_alphas
-                )
-                weights_in_reduce = sparsify_hierarchical_alphas(
-                    weights_in_reduce, sparsify_input_alphas
-                )
-            elif weights_pw_normal is not None:
-                weights_pw_normal = sparsify_pairwise_alphas(weights_pw_normal)
-                weights_pw_reduce = sparsify_pairwise_alphas(weights_pw_reduce)
+        #     if weights_in_normal is not None:
+        #         weights_in_normal = sparsify_hierarchical_alphas(
+        #             weights_in_normal, sparsify_input_alphas
+        #         )
+        #         weights_in_reduce = sparsify_hierarchical_alphas(
+        #             weights_in_reduce, sparsify_input_alphas
+        #         )
+        #     elif weights_pw_normal is not None:
+        #         weights_pw_normal = sparsify_pairwise_alphas(weights_pw_normal)
+        #         weights_pw_reduce = sparsify_pairwise_alphas(weights_pw_reduce)
 
         for cell in self.cells:
             weights = weights_reduce if cell.reduction else weights_normal
