@@ -1,0 +1,522 @@
+import time
+import pickle
+
+import torch
+from torch.optim import Adam
+import numpy as np
+
+from metanas.meta_optimizer.agents.agent import RL_agent
+from metanas.meta_optimizer.agents.utils.mp_utils import Worker, Buffer
+from metanas.meta_optimizer.agents.PPO.mp_core import ActorCritic
+
+
+def masked_mean(tensor, mask):
+    return (tensor.T * mask).sum() / torch.clamp(
+        (torch.ones_like(tensor.T) * mask).float().sum(), min=1.0)
+
+
+class PPO(RL_agent):
+    def __init__(
+            self, config, envs, logger_kwargs=dict(), seed=42, gamma=0.99,
+            lr=3e-4, clip_ratio=0.2, lam=0.97, n_mini_batch=4,
+            target_kl=0.05, value_coef=0.25, entropy_coef=0.01, epochs=100,
+            hidden_size=256, steps_per_worker=2500, sequence_length=8,
+            exploration_sampling=False, use_mask=False, model_path=None,
+            is_nas_env=False):
+        super().__init__(config, envs[0], logger_kwargs,
+                         seed, gamma, lr)
+
+        # PPO variables
+        self.lmbda = lam
+        self.gamma = gamma
+        self.clip_ratio = clip_ratio
+        self.value_coef = value_coef
+        self.entropy_coef = entropy_coef
+        self.target_kl = target_kl
+        self.hidden_size = hidden_size
+
+        self.is_nas_env = is_nas_env
+        self.use_mask = use_mask
+        self.exploration_sampling = exploration_sampling
+
+        # Steps variables
+        self.total_steps = 0
+        self.total_test_steps = 0
+
+        self.epochs = epochs
+        self.total_epochs = 0
+
+        # Buffer variables
+        self.n_workers = len(envs)
+        self.n_mini_batch = n_mini_batch
+        self.sequence_length = sequence_length
+        self.steps_per_worker = steps_per_worker
+
+        self.obs_dim = envs[0].observation_space.shape
+        self.obs = np.zeros((self.n_workers,) + self.obs_dim, dtype=np.float32)
+
+        # Initialize environment workers
+        self.workers = [Worker(env) for env in envs]
+
+        self.buffer = Buffer(self.n_workers, steps_per_worker, n_mini_batch,
+                             self.obs_dim, hidden_size, sequence_length,
+                             self.device)
+
+        # Define the model and optimizer
+        self.ac = ActorCritic(
+            envs[0], hidden_size, self.device, self.sequence_length,
+            use_mask=self.use_mask).to(self.device)
+
+        self.optimizer = Adam(self.ac.parameters(), lr=lr, eps=1e-5)
+
+        # Load existing model
+        if model_path is not None:
+            meta_state = torch.load(model_path['model'])
+            self.ac.load_state_dict(meta_state['ac'].state_dict())
+            self.optimizer.load_state_dict(meta_state['opt'].state_dict())
+
+            vars_dict = pickle.load(open(model_path['vars'], 'r'))
+            self.steps_t = vars_dict['steps']
+            self.test_steps_t = vars_dict['test_steps']
+            self.current_epoch = vars_dict['epoch']
+
+            # Set up model saving
+        self.logger.setup_pytorch_saver({'ac': self.ac, 'opt': self.optimizer})
+
+    def get_action(self, obs, prev_act, prev_rew, hid, mask=None):
+        # obs shape: [n_workers, obs_dim]
+        obs = torch.as_tensor(obs, dtype=torch.float32).to(self.device)
+
+        # Don't unsqueeze for one-hot encoding
+        # act shape: [n_workers]
+        prev_act = torch.as_tensor(
+            prev_act, dtype=torch.float32).to(self.device)
+
+        # rew shape: [n_workers, 1]
+        prev_rew = torch.as_tensor(
+            prev_rew, dtype=torch.float32).to(self.device).unsqueeze(1)
+
+        # Mask the illegal transitions, given by the environment
+        if self.use_mask:
+            mask = torch.tensor(mask, dtype=torch.bool).to(self.device)
+
+        return self.ac.step(obs, prev_act, prev_rew, hid, mask)
+
+    def set_task(self, envs):
+        assert len(envs) == self.n_workers, \
+            "The number of environments should equal to the number of workers"
+
+        self.workers = [Worker(env) for env in envs]
+
+    def run_test_trial(self):
+        """Run single meta-reinforcement learning testing trial for a given
+        number of worker steps.
+        """
+        start_time = time.time()
+        # Track statistics
+        ep_stats = {'ep_len': np.zeros(2), 'ep_rew': np.zeros(2)}
+
+        # RL2 variables
+        prev_act = np.zeros((self.n_workers,))
+        prev_rew = np.zeros((self.n_workers,))
+
+        # Set hidden states, resets each trial
+        self.hidden_states = torch.zeros(
+            [1, self.n_workers, self.hidden_size]).to(self.device)
+
+        # Reset environments
+        for worker in self.workers:
+            worker.child.send(("reset", None))
+
+        # Set observations
+        for w, worker in enumerate(self.workers):
+            self.obs[w] = worker.child.recv()
+
+        for t in range(self.steps_per_worker):
+            actions, _, _, self.hidden_states = self.get_action(
+                torch.tensor(self.obs), prev_act, prev_rew, self.hidden_states)
+
+            # Send actions to the environments
+            for w, worker in enumerate(self.workers):
+                worker.child.send(
+                    ("step", actions[w].cpu().numpy()))
+
+            # Retrieve step results from the environments
+            for w, worker in enumerate(self.workers):
+                obs, rew, done, info = worker.child.recv()
+
+                # Store temporary previous reward and action
+                prev_rew[w] = rew
+                prev_act[w] = actions[w]
+
+                # Track episode statistics
+                ep_stats['ep_len'][w] += 1
+                ep_stats['ep_rew'][w] += rew
+
+                # DARTS environment logging
+                if self.is_nas_env:
+                    acc = info['acc']
+                    if acc is not None:
+                        self.logger.store(
+                            MetaTestAcc=info['acc'])
+
+                    if 'test_acc' in info:
+                        self.logger.store(
+                            MetaTestTestAcc=info['test_acc'])
+
+                # Check if done or timeout
+                if done or ep_stats['ep_len'][w] == self.max_ep_len:
+
+                    # Store the information of the completed episode
+                    # (e.g. total reward, episode length)
+                    self.logger.store(MetaTestEpRet=ep_stats['ep_rew'][w],
+                                      MetaTestEpLen=ep_stats['ep_len'][w])
+
+                    worker.child.send(("reset", None))
+                    obs = worker.child.recv()
+
+                    # Reset statistics
+                    ep_stats['ep_len'][w] = 0
+                    ep_stats['ep_rew'][w] = 0
+
+                # Store latest observations
+                self.obs[w] = obs
+
+            self.total_test_steps += self.n_workers
+
+        # Close the workers at the end of the trial
+        try:
+            for worker in self.workers:
+                worker.child.send(("close", None))
+        except:
+            pass
+
+        if self.is_nas_env:
+            # Calculate final test reward, at the end of the episode
+            task_info = self.env.darts_evaluate_test_set()
+            self.logger.store(MetaTestTestAcc=task_info.top1)
+
+        self.log_test_trial()
+
+    def run_trial(self):
+        """Run single meta-reinforcement learning trial for a given number
+        of worker steps.
+
+        Returns:
+            dict: The final information dictionary of the trial
+        """
+        start_time = time.time()
+
+        for _ in range(self.epochs):
+
+            # Sample environment steps
+            self.sample_training_data()
+
+            # Prepare the sampled data inside the buffer (splits data
+            # into sequences)
+            self.buffer.prepare_batch_dict()
+
+            # Update the policy with sampled sequences
+            self.update_policy()
+
+            self.total_epochs += 1
+
+        # TODO: Save model with total epochs
+
+        # Close the workers at the end of the trial
+        try:
+            for worker in self.workers:
+                worker.child.send(("close", None))
+        except:
+            pass
+
+        if self.is_nas_env:
+            # Calculate final test reward, at the end of the episode
+            task_info = self.env.darts_evaluate_test_set()
+            self.logger.store(TestAcc=task_info.top1)
+
+        # The number of trials = total epochs / epochs per trial
+        self.log_trial(start_time, self.total_epochs//self.epochs)
+
+        if self.is_nas_env:
+            return task_info
+
+    def update_policy(self):
+        for i in range(self.n_mini_batch):
+            # Retrieve the to be trained mini batches via a generator
+            mini_batch_generator = self.buffer.recurrent_mini_batch_generator()
+            for mini_batch in mini_batch_generator:
+                self.optimizer.zero_grad()
+                loss, pi_info = self._train_mini_batch(mini_batch)
+
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(
+                    self.ac.parameters(), max_norm=0.5)
+                self.optimizer.step()
+
+                self.logger.store(
+                    Loss=loss, KL=pi_info['kl'], Entropy=pi_info['ent'],
+                    ClipFrac=pi_info['cf'])
+
+    def _train_mini_batch(self, samples):
+        obs, adv = samples["obs"], samples["adv"]
+        logp_old = samples["log_probs"]
+
+        # RL2 variables
+        prev_act = samples['prev_actions']
+        prev_rew = samples['prev_rewards'].view(-1, 1)
+
+        # Hidden states
+        hidden_states = samples["hxs"].unsqueeze(0)
+
+        # Policy loss
+        policy, _, _ = self.ac.pi(
+            obs, prev_act, prev_rew, hidden_states, training=True)
+
+        normalized_adv = (adv - adv.mean()) / (adv.std() + 1e-8)
+        logp = policy.log_prob(samples["actions"])
+        ratio = torch.exp(logp - logp_old)
+        surr1 = ratio * normalized_adv
+        surr2 = torch.clamp(ratio, 1.0 - self.clip_ratio,
+                            1.0 + self.clip_ratio) * normalized_adv
+
+        loss_pi = torch.min(surr1, surr2)
+        loss_pi = masked_mean(loss_pi, samples["loss_mask"])
+
+        # Value loss
+        value = self.ac.v(
+            obs, prev_act, prev_rew, hidden_states, training=True)
+
+        sampled_return = samples["values"] + samples["adv"]
+        clipped_value = samples["values"] + (
+            value - samples["values"]
+        ).clamp(min=-self.clip_ratio, max=self.clip_ratio)
+
+        loss_v = torch.max((value - sampled_return) ** 2,
+                           (clipped_value - sampled_return) ** 2)
+        loss_v = masked_mean(loss_v, samples["loss_mask"])
+
+        # Entropy Bonus
+        entropy = masked_mean(policy.entropy(), samples["loss_mask"])
+
+        # Complete loss
+        loss = -(
+            loss_pi - self.value_coef * loss_v + self.entropy_coef * entropy
+        )
+
+        # Useful extra info
+        # Approximate KL divergence
+        approx_kl = (logp_old - logp).mean().item()
+
+        # Clipped fraction
+        clipped = ratio.gt(1+self.clip_ratio) | ratio.lt(1-self.clip_ratio)
+        clipfrac = torch.as_tensor(clipped, dtype=torch.float32).mean().item()
+
+        return loss, dict(kl=approx_kl, ent=entropy.item(), cf=clipfrac)
+
+    def sample_training_data(self):
+        # Track statistics
+        ep_stats = {'ep_len': np.zeros(2), 'ep_rew': np.zeros(2)}
+
+        # RL2 variables
+        prev_act = np.zeros((self.n_workers,))
+        prev_rew = np.zeros((self.n_workers,))
+
+        # Set hidden states, resets each trial
+        self.hidden_states = torch.zeros(
+            [1, self.n_workers, self.hidden_size]).to(self.device)
+
+        # Reset environments
+        for worker in self.workers:
+            worker.child.send(("reset", None))
+
+        # Set observations
+        for w, worker in enumerate(self.workers):
+            self.obs[w] = worker.child.recv()
+
+        for t in range(self.steps_per_worker):
+
+            # Store variables in buffer
+            self.buffer.obs[:, t] = torch.tensor(self.obs)
+            self.buffer.hxs[:, t] = self.hidden_states.squeeze(0)
+
+            actions, v, logp_a, self.hidden_states = self.get_action(
+                torch.tensor(self.obs), prev_act, prev_rew,
+                self.hidden_states)
+
+            self.buffer.values[:, t] = v
+            self.buffer.actions[:, t] = actions
+            self.buffer.log_probs[:, t] = logp_a
+
+            # Send actions to the environments
+            for w, worker in enumerate(self.workers):
+                worker.child.send(
+                    ("step", self.buffer.actions[w, t].cpu().numpy()))
+
+            # Retrieve step results from the environments
+            for w, worker in enumerate(self.workers):
+                obs, rew, done, info = worker.child.recv()
+
+                self.buffer.rewards[w, t] = rew
+                self.buffer.dones[w, t] = done
+
+                # Additional RL2 storage
+                self.buffer.prev_rewards[w, t] = prev_rew[w]
+                self.buffer.prev_actions[w, t] = prev_act[w]
+
+                # Store temporary previous reward and action
+                prev_rew[w] = rew
+                prev_act[w] = actions[w]
+
+                # Track episode statistics
+                ep_stats['ep_len'][w] += 1
+                ep_stats['ep_rew'][w] += rew
+
+                if self.is_nas_env:
+                    # DARTS environment logging
+                    self._log_nas_info_dict(info)
+
+                # Check if done or timeout
+                if done or ep_stats['ep_len'][w] == self.max_ep_len:
+
+                    # Store the information of the completed episode
+                    # (e.g. total reward, episode length)
+                    self.logger.store(EpRet=ep_stats['ep_rew'][w],
+                                      EpLen=ep_stats['ep_len'][w])
+
+                    worker.child.send(("reset", None))
+                    obs = worker.child.recv()
+
+                    # Reset statistics
+                    ep_stats['ep_len'][w] = 0
+                    ep_stats['ep_rew'][w] = 0
+
+                # Store latest observations
+                self.obs[w] = obs
+
+            self.total_steps += self.n_workers
+
+        # Calculate advantages
+        _, last_value, _, _ = self.get_action(
+            torch.tensor(self.obs), prev_act, prev_rew,
+            self.hidden_states)
+        self.buffer.calc_advantages(last_value, self.gamma, self.lmbda)
+
+    def log_trial(self, start_time, trial):
+        """Log meta-training trial to tensorboard
+
+        Args:
+            start_time (time.Time): start time of trial
+            trial (int): Number of the trial
+        """
+
+        log_board = {
+            'Performance': ['EpRet', 'EpLen', 'Entropy', 'KL', 'ClipFrac',
+                            'Time'],
+            'Loss': ['Loss']}
+
+        if self.is_nas_env:
+            log_board['Environment'] = [
+                'NumAlphaAdj', 'NumEstimations', 'Acc', 'TestAcc',
+                'NumEdgeTrav', 'NumIllegalEdgeTrav', 'NumAlphaAdjBeforeTrav',
+                'UniqueEdges']
+
+        for key, value in log_board.items():
+            for val in value:
+                if val is not "Time":
+                    mean, std = self.logger.get_stats(val)
+                if key == 'Performance' or key == "Environment":
+                    if val == 'Time':
+                        self.summary_writer.add_scalar(
+                            key+'/Time', time.time()-start_time,
+                            self.total_steps)
+                    else:
+                        self.summary_writer.add_scalar(
+                            key+'/Average'+val, mean, self.total_steps)
+                        self.summary_writer.add_scalar(
+                            key+'/Std'+val, std, self.total_steps)
+                else:
+                    self.summary_writer.add_scalar(
+                        key+'/'+val, mean, self.total_steps)
+
+        # Log to console with SpinningUp logger
+        self.logger.log_tabular('Epoch', trial)
+        self.logger.log_tabular('EpRet', with_min_and_max=True)
+        self.logger.log_tabular('EpLen', average_only=True)
+
+        self.logger.log_tabular('Loss', average_only=True)
+        self.logger.log_tabular('ClipFrac', average_only=True)
+        self.logger.log_tabular('Entropy', average_only=True)
+        self.logger.log_tabular('KL', average_only=True)
+
+        # Ignore this metric for non-NAS environments
+        if self.is_nas_env:
+            self.logger.log_tabular(
+                'Acc', average_only=True, with_min_and_max=True)
+            self.logger.log_tabular(
+                'TestAcc', average_only=True, with_min_and_max=True)
+
+            self.logger.log_tabular('NumAlphaAdj', average_only=True)
+            self.logger.log_tabular('NumEstimations', average_only=True)
+            self.logger.log_tabular('NumEdgeTrav', average_only=True)
+            self.logger.log_tabular('NumIllegalEdgeTrav', average_only=True)
+            self.logger.log_tabular('NumAlphaAdjBeforeTrav', average_only=True)
+            self.logger.log_tabular('UniqueEdges', average_only=True)
+
+        self.logger.log_tabular('Time', time.time()-start_time)
+        self.logger.dump_tabular()
+
+    def log_test_trial(self):
+        """Log meta-test trial to tensorboard
+        """
+
+        log_board = {
+            'Performance': ['MetaTestEpRet', 'MetaTestEpLen']}
+
+        # Ignore this metric for non-NAS environments
+        if self.is_nas_env:
+            log_board['Environment'] = ['MetaTestAcc', 'MetaTestTestAcc']
+
+        for key, value in log_board.items():
+            for val in value:
+                mean, std = self.logger.get_stats(val)
+                if key == 'Performance' or key == "Environment":
+                    self.summary_writer.add_scalar(
+                        key+'/Average'+val, mean, self.total_test_steps)
+                    self.summary_writer.add_scalar(
+                        key+'/Std'+val, std, self.total_test_steps)
+
+    def _log_nas_info_dict(self, info_dict):
+        """Log info dict for NAS environment information
+
+        Args:
+            info_dict (dict): environment information dictionary
+        """
+        # Accuracy information
+        acc = info_dict['acc']
+        if acc is not None:
+            self.logger.store(Acc=info_dict['acc'])
+
+            # TODO: If terminate on 100% accuracy.
+            # if acc > 0.99:
+            #     terminate = True
+
+        self.logger.store(
+            NumIllegalEdgeTrav=info_dict['illegal_edge_traversals'])
+
+        # End of episode logging
+        if 'unique_edges' in info_dict:
+            self.logger.store(UniqueEdges=info_dict['unique_edges'])
+
+        if 'alpha_adjustments' in info_dict:
+            self.logger.store(NumAlphaAdj=info_dict['alpha_adjustments'])
+
+        if 'edge_traversals' in info_dict:
+            self.logger.store(NumEdgeTrav=info_dict['edge_traversals'])
+
+        if 'alpha_adj_before_trav' in info_dict:
+            self.logger.store(
+                NumAlphaAdjBeforeTrav=info_dict['alpha_adj_before_trav'])
+
+        if 'acc_estimations' in info_dict:
+            self.logger.store(NumEstimations=info_dict['acc_estimations'])

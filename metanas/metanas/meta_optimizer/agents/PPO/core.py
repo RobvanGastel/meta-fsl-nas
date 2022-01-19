@@ -50,7 +50,7 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     return layer
 
 
-# Source, https://boring-guy.sh/posts/masking-rl/
+# source, https://boring-guy.sh/posts/masking-rl/
 class MaskedCategorical(Categorical):
 
     def __init__(self, logits, mask=None):
@@ -75,8 +75,10 @@ class MaskedCategorical(Categorical):
             return super().log_prob(action)
 
         log_prob = super().log_prob(action)
-        # print(action, log_prob, self.mask)
         return log_prob
+
+
+"""Actor-Critic classes for RNN & MLPs"""
 
 
 class MLPCritic(nn.Module):

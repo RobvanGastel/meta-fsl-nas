@@ -512,7 +512,7 @@ class NasEnv(gym.Env):
         self.step_count += 1
 
         info_dict = {
-            "step_count": self.step_count,
+            "steps": self.step_count,
             "mask": mask,
             "action_id": action,
             "action": action_info,
