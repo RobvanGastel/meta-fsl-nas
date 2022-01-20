@@ -130,44 +130,45 @@ def set_hyperparameter(config):
 def set_rl_hyperparameters(config):
     config.logger_kwargs = setup_logger_kwargs(config.path,
                                                seed=config.seed)
-    config.count_trajectories = True
-    config.number_of_trajectories = 15
-    config.num_test_episodes = 5
-
-    # DARTS estimation
-    config.update_weights_and_alphas = False
-
-    # E-RL2 sampling
-    config.exploration_sampling = config.agent_exploration
 
     # Environment variables
-    # Configure reward range
     if bool(config.env_min_rew) ^ bool(config.env_max_rew):
         raise RuntimeError("Reward range is not defined.")
 
+    # Reward range
     config.max_rew = config.env_max_rew
     config.min_rew = config.env_min_rew
 
+    # TODO: Configure DARTS estimation
+    config.update_weights_and_alphas = False
     config.encourage_exploration = config.env_encourage_exploration
 
     # Graph walk logging
-    config.graph_walk_index = config.start_epoch
-    config.graph_walk_path = os.path.join(config.path + "graph_walk.shlv")
+    # config.graph_walk_index = config.start_epoch
+    # config.graph_walk_path = os.path.join(config.path + "graph_walk.shlv")
+
+    # Agent configuration
+    config.agent_epochs_per_trial = 3
+    config.agent_steps_per_epoch = 800
 
     if config.agent == "ppo":
         config.gamma = 0.99
-        config.polyak = 0.995
-
-        config.agent_lr = 3e-4
-        config.agent_ppo_iter = 4
         config.agent_lambda = 0.97
+        config.agent_lr = 3e-4
+        config.agent_n_mini_batch = 4
+        config.agent_update_freq = 10
+        config.agent_seq_len = 16
 
-        config.agent_trials_per_mdp = 1
-        config.agent_batch_size = 10
-        config.agent_update_freq = 5
+        # TODO: Use agent mask
+        config.use_agent_mask = True
 
-        config.replay_size = int(1e6)
-    elif config.agent != "random":
+        # E-RL2 sampling
+        config.exploration_sampling = config.agent_exploration
+
+    elif config.agent == "random":
+        config.agent_steps_per_trial = (
+            config.agent_epochs_per_trial * config.agent_steps_per_epoch)
+    else:
         raise RuntimeError(f"No hp parameters for {config.agent} agent")
     return config
 

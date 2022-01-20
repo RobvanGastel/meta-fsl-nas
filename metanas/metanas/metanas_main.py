@@ -19,8 +19,8 @@ from metanas.utils import genotypes as gt
 from metanas.utils import utils
 
 from metanas.utils.cosine_power_annealing import cosine_power_annealing
-from metanas.meta_optimizer.agents.Random.mp_random import RandomAgent, EpisodeFinished
-from metanas.meta_optimizer.agents.PPO.rl2_ppo import PPO
+from metanas.meta_optimizer.agents.Random.mp_random import RandomAgent
+from metanas.meta_optimizer.agents.PPO.mp_rl2_ppo import PPO
 from metanas.env.nas_env import NasEnv
 
 
@@ -214,28 +214,27 @@ def _init_meta_rl_agent(config, meta_model):
 
     if config.agent == "random":
         agent = RandomAgent(config,
-                            env_normal,
-                            epochs=config.agent_trials_per_mdp,
+                            [env_normal, env_normal],
                             steps_per_epoch=config.agent_steps_per_trial,
-                            num_test_episodes=config.num_test_episodes,
-                            logger_kwargs=config.logger_kwargs)
+                            logger_kwargs=config.logger_kwargs,
+                            is_nas_env=True)
     elif config.agent == "ppo":
         agent = PPO(config,
-                    env_normal,
+                    [env_normal, env_normal],
                     logger_kwargs=config.logger_kwargs,
                     seed=config.seed,
                     gamma=config.gamma,
-                    lr=config.agent_lr,
-                    ppo_iter=config.agent_ppo_iter,
                     lam=config.agent_lambda,
-                    update_freq=config.agent_update_freq,
-                    epochs=config.agent_trials_per_mdp,  # 1 trial
+                    lr=config.agent_lr,
+                    n_mini_batch=config.agent_n_mini_batch,
+                    steps_per_worker=config.agent_steps_per_epoch,
+                    epochs=config.agent_epochs_per_trial,
                     hidden_size=config.agent_hidden_size,
-                    count_trajectories=config.count_trajectories,
-                    number_of_trajectories=config.number_of_trajectories,
+                    sequence_length=config.agent_seq_len,
                     exploration_sampling=config.exploration_sampling,
-                    model_path=config.agent_model,
-                    vars_path=config.agent_model_vars)
+                    use_mask=config.use_agent_mask, is_nas_env=True,
+                    model_path={'model': config.agent_model,
+                                'vars': config.agent_model_vars})
 
     else:
         raise ValueError(f"The given agent {config.agent} is not supported.")
@@ -250,52 +249,15 @@ def meta_rl_optimization(
     env_normal.set_task(task, meta_state, test_phase)
     env_reduce.set_task(task, meta_state, test_phase)
 
-    pipes = []
-    agents = []
     start = time.time()
 
-    terminatedAgents = [False, False]
-
-    # Set meta-model share_memory()
-    for agent_id, env in enumerate([env_normal, env_reduce]):
-        p_start, p_end = mp.Pipe()
-        agent = RandomAgent(str(agent_id), p_end, env)
-        agent.start()
-
-        agents.append(agent)
-        pipes.append(p_start)
-
-    # starting training loop
-    while True:
-        for i, conn in enumerate(pipes):
-            if conn.poll():
-                message = conn.recv()
-
-                if type(message).__name__ == "EpisodeFinished":
-                    print(f"Terminated agent {i}")
-                    terminatedAgents[i] = True
-
-        if False not in terminatedAgents:
-            break
-
-    for agent in agents:
-        agent.terminate()
+    agent.set_task([env_normal, env_reduce])
+    agent.run_trial()
 
     time_delta = (time.time() - start)
     config.logger.info(f"time: {time_delta/60}")
 
     config.logger.info("Done")
-    # agent.train_agent(env_normal)
-    # task_info = agent.train_agent(env_reduce)
-
-    # Now, save the meta-RL model
-    # Save optimizer and networks with variables
-    # if (meta_epoch % config.print_freq == 0) or \
-    #         (meta_epoch == config.meta_epochs) and not test_phase:
-    #     agent_vars = {"steps": agent.global_steps,
-    #                   "test_steps": agent.global_test_steps,
-    #                   "epoch": agent.current_epoch}
-    #     agent.logger.save_state(agent_vars, meta_epoch)
 
     # Update the meta_model for task-learner or meta update
     if meta_epoch <= config.warm_up_epochs:

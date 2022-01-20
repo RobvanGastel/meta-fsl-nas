@@ -20,7 +20,7 @@ class PPO(RL_agent):
             self, config, envs, logger_kwargs=dict(), seed=42, gamma=0.99,
             lr=3e-4, clip_ratio=0.2, lam=0.97, n_mini_batch=4,
             target_kl=0.05, value_coef=0.25, entropy_coef=0.01, epochs=100,
-            hidden_size=256, steps_per_worker=2500, sequence_length=8,
+            hidden_size=256, steps_per_worker=800, sequence_length=8,
             exploration_sampling=False, use_mask=False, model_path=None,
             is_nas_env=False):
         super().__init__(config, envs[0], logger_kwargs,

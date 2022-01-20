@@ -1,17 +1,10 @@
 import argparse
-
-import time
 import numpy as np
-
-import torch.multiprocessing as mp
 
 from metanas.env.krazy_world_env import KrazyWorld
 from metanas.meta_optimizer.agents.PPO.mp_rl2_ppo import PPO
 from metanas.meta_optimizer.agents.Random.mp_random import RandomAgent
 from metanas.meta_optimizer.agents.utils.run_utils import setup_logger_kwargs
-
-
-# from metanas.meta_optimizer.agents.utils.mp_utils import TrialFinished
 
 
 if __name__ == "__main__":
@@ -42,11 +35,9 @@ if __name__ == "__main__":
     path = f"KrazyWorld/mp_{args.agent}_meta_learning_seq16_{args.name}"
     logger_kwargs = setup_logger_kwargs(path, seed=args.seed)
 
-    env = np.random.choice(envs, 1)[0]
-
-    # Vars
     epochs = 3
     steps_per_worker = 1000
+    env = np.random.choice(envs, 1)[0]
 
     if args.agent == "PPO":
         agent = PPO(None, [envs[0], envs[0]], epochs=epochs,
