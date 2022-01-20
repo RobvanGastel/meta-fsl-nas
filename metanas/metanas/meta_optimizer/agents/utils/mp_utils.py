@@ -35,12 +35,15 @@ class Buffer:
         recurrent policies. """
 
     def __init__(self, n_workers, steps_per_worker, n_mini_batch,
-                 obs_dim, hidden_size, sequence_length, device):
+                 obs_dim, act_dim, hidden_size, sequence_length,
+                 use_mask, device):
 
         # Setup members
         self.device = device
         self.n_workers = n_workers
         self.worker_steps = steps_per_worker
+
+        self.use_mask = use_mask
 
         self.n_mini_batches = n_mini_batch
         self.batch_size = self.n_workers * self.worker_steps
@@ -59,6 +62,9 @@ class Buffer:
             (self.n_workers, self.worker_steps), dtype=torch.float32)
         self.prev_actions = torch.zeros(
             (self.n_workers, self.worker_steps), dtype=torch.long)
+
+        if self.use_mask:
+            self.masks = torch.zeros(self.n_workers, act_dim, dtype=torch.bool)
 
         self.dones = np.zeros(
             (self.n_workers, self.worker_steps), dtype=np.bool)
@@ -92,9 +98,11 @@ class Buffer:
                                     dtype=torch.float32)
         }
 
-        # Split data into sequences and apply zero-padding
-        # Retrieve the indices of dones as these are the last step of a
-        # whole episode
+        if self.use_mask:
+            samples['masks'] = self.masks
+
+        # Split data into sequences and apply zero-padding. Retrieve the
+        # indices of dones as these are the last step of a whole episode
         episode_done_indices = []
         for w in range(self.n_workers):
             episode_done_indices.append(list(self.dones[w].nonzero()[0]))

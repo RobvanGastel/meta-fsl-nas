@@ -533,7 +533,7 @@ class NasEnv(gym.Env):
             info_dict['unique_edges'] = number_of_unique_visits(
                 self.unique_edges)
 
-        return self.current_state, reward, done, info_dict, mask
+        return self.current_state, reward, done, info_dict
 
     def close(self):
         pass

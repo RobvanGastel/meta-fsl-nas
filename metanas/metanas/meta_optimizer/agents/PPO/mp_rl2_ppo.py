@@ -52,14 +52,18 @@ class PPO(RL_agent):
         self.sequence_length = sequence_length
         self.steps_per_worker = steps_per_worker
 
-        self.obs_dim = envs[0].observation_space.shape
-        self.obs = np.zeros((self.n_workers,) + self.obs_dim, dtype=np.float32)
+        act_dim = envs[0].action_space.n
+        obs_dim = envs[0].observation_space.shape
+        self.obs = np.zeros((self.n_workers,) + obs_dim, dtype=np.float32)
+
+        if use_mask:
+            self.masks = np.zeros((self.n_workers,) + act_dim, dtype=np.bool)
 
         # Initialize environment workers
         self.workers = [Worker(env) for env in envs]
 
         self.buffer = Buffer(self.n_workers, steps_per_worker, n_mini_batch,
-                             self.obs_dim, hidden_size, sequence_length,
+                             obs_dim, act_dim, hidden_size, sequence_length,
                              self.device)
 
         # Define the model and optimizer
@@ -67,7 +71,9 @@ class PPO(RL_agent):
             envs[0], hidden_size, self.device, self.sequence_length,
             use_mask=self.use_mask).to(self.device)
 
+        # TODO: Changed adam to adamW
         self.optimizer = Adam(self.ac.parameters(), lr=lr, eps=1e-5)
+        # self.optimizer = AdamW(self.ac.parameters(), lr=lr)
 
         # Load existing model
         if model_path is not None:
@@ -130,7 +136,10 @@ class PPO(RL_agent):
 
         # Set observations
         for w, worker in enumerate(self.workers):
-            self.obs[w] = worker.child.recv()
+            if self.use_mask:
+                self.obs[w], self.masks[w] = worker.child.recv()
+            else:
+                self.obs[w] = worker.child.recv()
 
         for t in range(self.steps_per_worker):
             actions, _, _, self.hidden_states = self.get_action(
@@ -145,6 +154,9 @@ class PPO(RL_agent):
             for w, worker in enumerate(self.workers):
                 obs, rew, done, info = worker.child.recv()
 
+                if self.use_mask:
+                    self.masks[w] = info['mask']
+
                 # Store temporary previous reward and action
                 prev_rew[w] = rew
                 prev_act[w] = actions[w]
@@ -157,12 +169,10 @@ class PPO(RL_agent):
                 if self.is_nas_env:
                     acc = info['acc']
                     if acc is not None:
-                        self.logger.store(
-                            MetaTestAcc=info['acc'])
+                        self.logger.store(MetaTestAcc=info['acc'])
 
                     if 'test_acc' in info:
-                        self.logger.store(
-                            MetaTestTestAcc=info['test_acc'])
+                        self.logger.store(MetaTestTestAcc=info['test_acc'])
 
                 # Check if done or timeout
                 if done or ep_stats['ep_len'][w] == self.max_ep_len:
@@ -332,13 +342,18 @@ class PPO(RL_agent):
 
         # Set observations
         for w, worker in enumerate(self.workers):
-            self.obs[w] = worker.child.recv()
+            if self.use_mask:
+                self.obs[w], self.masks[w] = worker.child.recv()
+            else:
+                self.obs[w] = worker.child.recv()
 
         for t in range(self.steps_per_worker):
 
             # Store variables in buffer
             self.buffer.obs[:, t] = torch.tensor(self.obs)
             self.buffer.hxs[:, t] = self.hidden_states.squeeze(0)
+            if self.use_mask:
+                self.buffer.masks[:, t] = torch.tensor(self.masks)
 
             actions, v, logp_a, self.hidden_states = self.get_action(
                 torch.tensor(self.obs), prev_act, prev_rew,
@@ -356,6 +371,9 @@ class PPO(RL_agent):
             # Retrieve step results from the environments
             for w, worker in enumerate(self.workers):
                 obs, rew, done, info = worker.child.recv()
+
+                if self.use_mask:
+                    self.masks[w] = info['mask']
 
                 self.buffer.rewards[w, t] = rew
                 self.buffer.dones[w, t] = done
