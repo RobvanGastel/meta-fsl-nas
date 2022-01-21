@@ -204,9 +204,10 @@ def meta_architecture_search(
 
 def _init_meta_rl_agent(config, meta_model):
     # Dummy environment to set shapes and sizes
-    env_normal = NasEnv(config, meta_model,
-                        cell_type="normal",
-                        reward_estimation=config.use_metad2a_estimation)
+    env_normal = NasEnv(
+        config, meta_model, cell_type="normal",
+        reward_estimation=config.use_metad2a_estimation,
+        disable_pairwise_alphas=config.env_disable_pairwise_alphas)
 
     # If one of the model path is undefined raise error
     if bool(config.agent_model_vars) ^ bool(config.agent_model):
@@ -259,6 +260,13 @@ def meta_rl_optimization(
 
     config.logger.info("Done")
 
+    if (meta_epoch % config.print_freq == 0) or \
+            (meta_epoch == config.meta_epochs) and not test_phase:
+        agent_vars = {"steps": agent.global_steps,
+                      "test_steps": agent.global_test_steps,
+                      "epoch": agent.current_epoch}
+        agent.logger.save_state(agent_vars, meta_epoch)
+
     # Update the meta_model for task-learner or meta update
     if meta_epoch <= config.warm_up_epochs:
         meta_model.load_state_dict(meta_state)
@@ -278,8 +286,8 @@ def meta_rl_optimization(
             meta_model.load_state_dict(max_meta_state)
 
     # Set task_info to None for metaD2A
-    # if config.use_metad2a_estimation:
-    task_info = None
+    if config.use_metad2a_estimation:
+        task_info = None
 
     return task_info, meta_model
 
@@ -555,12 +563,14 @@ def train(
         )
 
     # Environment to learn reduction and normal cell
-    env_normal = NasEnv(config, meta_model,
-                        cell_type="normal",
-                        reward_estimation=config.use_metad2a_estimation)
-    env_reduce = NasEnv(config, meta_model,
-                        cell_type="reduce",
-                        reward_estimation=config.use_metad2a_estimation)
+    env_normal = NasEnv(
+        config, meta_model, cell_type="normal",
+        reward_estimation=config.use_metad2a_estimation,
+        disable_pairwise_alphas=config.env_disable_pairwise_alphas)
+    env_reduce = NasEnv(
+        config, meta_model, cell_type="reduce",
+        reward_estimation=config.use_metad2a_estimation,
+        disable_pairwise_alphas=config.env_disable_pairwise_alphas)
 
     for meta_epoch in range(config.start_epoch, config.meta_epochs + 1):
 
@@ -804,12 +814,15 @@ def evaluate(config, meta_model, task_distribution, task_optimizer, agent):
         alpha_logger = None
 
     # Environment to learn reduction and normal cell
-    env_normal = NasEnv(config, meta_model,
-                        cell_type="normal",
-                        reward_estimation=config.use_metad2a_estimation)
-    env_reduce = NasEnv(config, meta_model,
-                        cell_type="reduce",
-                        reward_estimation=config.use_metad2a_estimation)
+    env_normal = NasEnv(
+        config, meta_model, cell_type="normal",
+        reward_estimation=config.use_metad2a_estimation,
+        disable_pairwise_alphas=config.env_disable_pairwise_alphas)
+
+    env_reduce = NasEnv(
+        config, meta_model, cell_type="reduce",
+        reward_estimation=config.use_metad2a_estimation,
+        disable_pairwise_alphas=config.env_disable_pairwise_alphas)
 
     for eval_epoch in range(config.eval_epochs):
 
@@ -1256,6 +1269,9 @@ if __name__ == "__main__":
     parser.add_argument("--env_max_rew", type=float, default=None)
 
     parser.add_argument("--use_meta_model",
+                        action="store_true")
+
+    parser.add_argument("--env_disable_pairwise_alphas",
                         action="store_true")
 
     # MetaD2A reward estimation settings

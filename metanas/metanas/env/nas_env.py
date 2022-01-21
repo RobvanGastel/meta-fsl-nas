@@ -30,13 +30,16 @@ class NasEnv(gym.Env):
 
     def __init__(self, config, meta_model, test_phase=False,
                  cell_type="normal", reward_estimation=False,
-                 max_ep_len=200, test_env=None):
+                 max_ep_len=200, disable_pairwise_alphas=False,
+                 test_env=None):
         super().__init__()
         self.config = config
         self.test_env = test_env
         self.cell_type = cell_type
         self.primitives = config.primitives
         self.n_ops = len(config.primitives)
+
+        self.disable_pairwise_alphas = disable_pairwise_alphas
 
         self.test_phase = test_phase
         self.meta_model = meta_model
@@ -831,7 +834,8 @@ class NasEnv(gym.Env):
 
             # phase 1. child network step (w)
             self.w_optim.zero_grad()
-            logits = self.meta_model(train_X)
+            logits = self.meta_model(
+                train_X, disable_pairwise_alphas=self.disable_pairwise_alphas)
 
             loss = self.meta_model.criterion(logits, train_y)
             loss.backward()
@@ -846,7 +850,9 @@ class NasEnv(gym.Env):
             self.w_optim.step()
 
             # Obtain accuracy with gradient step
-            logits = self.meta_model(train_X, sparsify_input_alphas=True)
+            logits = self.meta_model(
+                train_X, sparsify_input_alphas=True,
+                disable_pairwise_alphas=self.disable_pairwise_alphas)
             prec1, _ = utils.accuracy(logits, train_y, topk=(1, 5))
 
         if (
@@ -903,7 +909,6 @@ class NasEnv(gym.Env):
         self.a_optim.zero_grad()  # Reset to get ready for new unrolling
         self.w_optim.zero_grad()
 
-        # TODO: Adjust
         # Temporary backup for new architecture encoding
         new_arch_params = copy.deepcopy(self.meta_model.alpha_normal)
 
@@ -925,7 +930,9 @@ class NasEnv(gym.Env):
             self.a_optim.zero_grad()
 
             # Obtain accuracy with gradient step
-            logits = self.meta_model(train_X, sparsify_input_alphas=True)
+            logits = self.meta_model(
+                train_X, sparsify_input_alphas=True,
+                disable_pairwise_alphas=self.disable_pairwise_alphas)
             prec1, _ = utils.accuracy(logits, train_y, topk=(1, 5))
 
         if (
@@ -973,7 +980,8 @@ class NasEnv(gym.Env):
                 self.config.device), train_y.to(self.config.device)
 
             self.w_optim.zero_grad()
-            logits = self.meta_model(train_X)
+            logits = self.meta_model(train_X,
+                                     disable_pairwise_alphas=self.disable_pairwise_alphas)
 
             loss = self.meta_model.criterion(logits, train_y)
             loss.backward()
@@ -989,7 +997,8 @@ class NasEnv(gym.Env):
             self.w_optim.step()
 
             # Obtain accuracy with gradient step
-            logits = self.meta_model(train_X, sparsify_input_alphas=True)
+            logits = self.meta_model(train_X, sparsify_input_alphas=True,
+                                     disable_pairwise_alphas=self.disable_pairwise_alphas)
             prec1, _ = utils.accuracy(logits, train_y, topk=(1, 5))
 
         if (
@@ -1025,8 +1034,8 @@ class NasEnv(gym.Env):
                 y_test = y_test.to(self.config.device, non_blocking=True)
 
                 logits = self.meta_model(
-                    x_test, sparsify_input_alphas=True
-                )
+                    x_test, sparsify_input_alphas=True,
+                    disable_pairwise_alphas=self.disable_pairwise_alphas)
 
                 loss = self.meta_model.criterion(logits, y_test)
                 y_test_pred = logits.softmax(dim=1)

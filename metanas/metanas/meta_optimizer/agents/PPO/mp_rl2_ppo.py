@@ -64,14 +64,14 @@ class PPO(RL_agent):
 
         self.buffer = Buffer(self.n_workers, steps_per_worker, n_mini_batch,
                              obs_dim, act_dim, hidden_size, sequence_length,
-                             self.device)
+                             use_mask, self.device,
+                             exploration_sampling=exploration_sampling)
 
         # Define the model and optimizer
         self.ac = ActorCritic(
             envs[0], hidden_size, self.device, self.sequence_length,
             use_mask=self.use_mask).to(self.device)
 
-        # TODO: Changed adam to adamW
         self.optimizer = Adam(self.ac.parameters(), lr=lr, eps=1e-5)
         # self.optimizer = AdamW(self.ac.parameters(), lr=lr)
 
@@ -230,8 +230,6 @@ class PPO(RL_agent):
             self.update_policy()
 
             self.total_epochs += 1
-
-        # TODO: Save model with total epochs
 
         # Close the workers at the end of the trial
         try:

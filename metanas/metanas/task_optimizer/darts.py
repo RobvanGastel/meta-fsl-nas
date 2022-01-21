@@ -188,7 +188,7 @@ class Darts:
                 model_has_normalizer
                 and train_step < (arch_adap_steps - 1)
                 and not warm_up
-            ):  # todo check if not warm_up is correct
+            ):  # check if not warm_up is correct
                 self.model.normalizer["params"]["curr_step"] += 1
                 self.architect.v_net.normalizer["params"]["curr_step"] += 1
 
@@ -523,9 +523,9 @@ class Architect:
         # compute gradient
         v_alphas = tuple(self.v_net.alphas())
         v_weights = tuple(self.v_net.weights())
-        # TODO: Check allow_unused=True setting
+
         v_grads = torch.autograd.grad(
-            loss, v_alphas + v_weights, allow_unused=True)
+            loss, v_alphas + v_weights)
         dalpha = v_grads[: len(v_alphas)]
         dw = v_grads[len(v_alphas):]
 

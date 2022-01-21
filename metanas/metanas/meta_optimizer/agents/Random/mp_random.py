@@ -64,7 +64,7 @@ class RandomAgent(RL_agent):
 
             # Retrieve step results from the environments
             for w, worker in enumerate(self.workers):
-                obs, rew, done, info = worker.child.recv()
+                _, rew, done, info = worker.child.recv()
 
                 # Track episode statistics
                 ep_stats['ep_len'][w] += 1

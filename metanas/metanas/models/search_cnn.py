@@ -479,7 +479,7 @@ class SearchCNNController(nn.Module):
             if isinstance(module, nn.Dropout):
                 module.p = p
 
-    def forward(self, x, sparsify_input_alphas=None):
+    def forward(self, x, sparsify_input_alphas=None, disable_pairwise_alphas=False):
         """Forward pass through the network
 
         Args:
@@ -519,6 +519,7 @@ class SearchCNNController(nn.Module):
                 weights_pw_reduce,
                 sparsify_input_alphas=sparsify_input_alphas,
                 alpha_prune_threshold=self.alpha_prune_threshold,
+                disable_pairwise_alphas=disable_pairwise_alphas
             )
 
         # scatter x
@@ -761,6 +762,7 @@ class SearchCNN(nn.Module):
         weights_pw_reduce=None,
         sparsify_input_alphas=None,
         alpha_prune_threshold=0.0,
+        disable_pairwise_alphas=False,
     ):
         """Forward pass through the networks
 
@@ -799,24 +801,26 @@ class SearchCNN(nn.Module):
         """
         s0 = s1 = self.stem(x)
 
-        # TODO: Make configurable
-        # if sparsify_input_alphas:
+        if not disable_pairwise_alphas:
+            if sparsify_input_alphas:
 
-        #     # always sparsify edge alphas (keep only edge with max
-        #     # prob for each previous node)
-        #     weights_normal = sparsify_alphas(weights_normal)
-        #     weights_reduce = sparsify_alphas(weights_reduce)
+                # always sparsify edge alphas (keep only edge with max
+                # prob for each previous node)
+                weights_normal = sparsify_alphas(weights_normal)
+                weights_reduce = sparsify_alphas(weights_reduce)
 
-        #     if weights_in_normal is not None:
-        #         weights_in_normal = sparsify_hierarchical_alphas(
-        #             weights_in_normal, sparsify_input_alphas
-        #         )
-        #         weights_in_reduce = sparsify_hierarchical_alphas(
-        #             weights_in_reduce, sparsify_input_alphas
-        #         )
-        #     elif weights_pw_normal is not None:
-        #         weights_pw_normal = sparsify_pairwise_alphas(weights_pw_normal)
-        #         weights_pw_reduce = sparsify_pairwise_alphas(weights_pw_reduce)
+                if weights_in_normal is not None:
+                    weights_in_normal = sparsify_hierarchical_alphas(
+                        weights_in_normal, sparsify_input_alphas
+                    )
+                    weights_in_reduce = sparsify_hierarchical_alphas(
+                        weights_in_reduce, sparsify_input_alphas
+                    )
+                elif weights_pw_normal is not None:
+                    weights_pw_normal = sparsify_pairwise_alphas(
+                        weights_pw_normal)
+                    weights_pw_reduce = sparsify_pairwise_alphas(
+                        weights_pw_reduce)
 
         for cell in self.cells:
             weights = weights_reduce if cell.reduction else weights_normal

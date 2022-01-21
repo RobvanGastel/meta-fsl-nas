@@ -140,7 +140,7 @@ def set_rl_hyperparameters(config):
     config.min_rew = config.env_min_rew
 
     # TODO: Configure DARTS estimation
-    config.update_weights_and_alphas = False
+    config.update_weights_and_alphas = config.env_update_weights_and_alphas
     config.encourage_exploration = config.env_encourage_exploration
 
     # Graph walk logging
@@ -159,8 +159,7 @@ def set_rl_hyperparameters(config):
         config.agent_update_freq = 10
         config.agent_seq_len = 16
 
-        # TODO: Use agent mask
-        config.use_agent_mask = True
+        config.use_agent_mask = config.agent_use_mask
 
         # E-RL2 sampling
         config.exploration_sampling = config.agent_exploration

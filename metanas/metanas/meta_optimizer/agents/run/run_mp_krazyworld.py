@@ -32,7 +32,7 @@ if __name__ == "__main__":
                  for s in range(100, 164)]
 
     # Setup logging
-    path = f"KrazyWorld/mp_{args.agent}_meta_learning_seq16_{args.name}"
+    path = f"KrazyWorld/mp_{args.agent}_meta_learning_exploration_{args.name}"
     logger_kwargs = setup_logger_kwargs(path, seed=args.seed)
 
     epochs = 3
@@ -42,6 +42,7 @@ if __name__ == "__main__":
     if args.agent == "PPO":
         agent = PPO(None, [envs[0], envs[0]], epochs=epochs,
                     steps_per_worker=steps_per_worker,
+                    exploration_sampling=True,
                     sequence_length=16, logger_kwargs=logger_kwargs)
     if args.agent == "Random":
         agent = RandomAgent(None, [envs[0], envs[0]],

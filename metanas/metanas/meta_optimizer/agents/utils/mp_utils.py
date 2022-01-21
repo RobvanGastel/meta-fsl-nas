@@ -36,18 +36,21 @@ class Buffer:
 
     def __init__(self, n_workers, steps_per_worker, n_mini_batch,
                  obs_dim, act_dim, hidden_size, sequence_length,
-                 use_mask, device):
+                 use_mask, device, exploration_sampling=False):
 
         # Setup members
         self.device = device
         self.n_workers = n_workers
         self.worker_steps = steps_per_worker
 
+        # Settings for agent
         self.use_mask = use_mask
+        self.exploration_sampling = exploration_sampling
 
         self.n_mini_batches = n_mini_batch
         self.batch_size = self.n_workers * self.worker_steps
         self.mini_batch_size = self.batch_size // self.n_mini_batches
+
         self.sequence_length = sequence_length
         self.true_sequence_length = 0
 
@@ -191,7 +194,7 @@ class Buffer:
         # Concatenate the zeros to the sequence
         return torch.cat((sequence, padding), axis=0)
 
-    def recurrent_mini_batch_generator(self) -> dict:
+    def recurrent_mini_batch_generator(self, exploration_p=0.3):
         """A recurrent generator that returns a dictionary providing training
         data arranged in mini batches. This generator shuffles the data by
         sequences.
@@ -212,8 +215,9 @@ class Buffer:
             # Add the remainder if the sequence count and the number of
             # mini batches do not share a common divider
             num_sequences_per_batch[i] += 1
+
         # Prepare indices, but only shuffle the sequence indices and not
-            # the entire batch.
+        # the entire batch.
         indices = torch.arange(
             0, num_sequences * self.true_sequence_length).reshape(
             num_sequences, self.true_sequence_length)
@@ -225,18 +229,43 @@ class Buffer:
         start = 0
         for n_sequences in num_sequences_per_batch:
             end = start + n_sequences
-            mini_batch_indices = indices[sequence_indices[start:end]
-                                         ].reshape(-1)
+
+            mini_batch_indices = indices[
+                sequence_indices[start:end]].reshape(-1)
+
+            # Exploration sampling
+            if self.exploration_sampling:
+                mini_batch_seqs = indices[sequence_indices[start:end]]
+
+                n = len(mini_batch_seqs)
+                # p explore-rollouts
+                p = int(n * exploration_p)
+                explore_indices = np.random.choice(
+                    len(mini_batch_seqs), p, replace=False)
+
             mini_batch = {}
             for key, value in self.samples_flat.items():
                 if key != "hxs":
-                    mini_batch[key] = value[mini_batch_indices].to(self.device)
+                    if self.exploration_sampling and key == "values":
+
+                        # k rollouts sequences
+                        rollouts = value[mini_batch_seqs].to(self.device)
+
+                        # Leaving with k-p exploit-rollouts
+                        rollouts[explore_indices] = torch.zeros(
+                            self.sequence_length).to(self.device)
+
+                        mini_batch[key] = rollouts.reshape(-1)
+                    else:
+                        mini_batch[key] = value[
+                            mini_batch_indices].to(self.device)
                 else:
                     # Collect only the recurrent cell states that are at
                     # the beginning of a sequence
                     mini_batch[key] = value[sequence_indices[start:end]].to(
                         self.device)
             start = end
+
             yield mini_batch
 
     def calc_advantages(self, last_value: torch.tensor,
