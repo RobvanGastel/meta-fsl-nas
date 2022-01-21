@@ -149,7 +149,7 @@ def set_rl_hyperparameters(config):
 
     # Agent configuration
     config.agent_epochs_per_trial = 3
-    config.agent_steps_per_epoch = 800
+    config.agent_steps_per_epoch = 700
 
     if config.agent == "ppo":
         config.gamma = 0.99

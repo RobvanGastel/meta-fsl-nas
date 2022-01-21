@@ -81,18 +81,24 @@ do
         # --use_limit_skip_connection \
 
 		# Environment
-        # 8 or 12
-		--darts_estimation_steps 12 \
+		--darts_estimation_steps 8 \
+        --env_update_weights_and_alphas \
+        --env_disable_pairwise_alphas \
+
         --use_env_random_start \
 
+        --env_encourage_exploration \
         --env_min_rew -0.10 \
         --env_max_rew 2.00 \
         
         # meta-RL agent
         --agent ${AGENT} \
-        # E-RL^2
-		--agent_exploration \
+        # E-RL2 batch sampling
+        --agent_exploration \
         --agent_hidden_size 256 \
+
+        # Use policy masking illegal actions
+        --agent_use_mask \
     )
 
     python -u -m metanas.metanas_main "${args[@]}"

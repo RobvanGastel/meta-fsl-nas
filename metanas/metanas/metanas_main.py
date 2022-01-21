@@ -1241,7 +1241,7 @@ if __name__ == "__main__":
 
     # Meta-RL agent settings
     parser.add_argument("--agent", default="random",
-                        help="random / sac")
+                        help="random / ppo")
 
     parser.add_argument("--agent_model", default=None,
                         type=str, help="Path to pretrained model")
@@ -1252,8 +1252,9 @@ if __name__ == "__main__":
     parser.add_argument("--agent_exploration", action="store_true")
 
     parser.add_argument("--agent_hidden_size",
-                        type=int,
-                        default=None)
+                        type=int, default=None)
+
+    parser.add_argument("--agent_use_mask", action="store_true")
 
     # Environment settings
     parser.add_argument("--darts_estimation_steps",
@@ -1269,6 +1270,9 @@ if __name__ == "__main__":
     parser.add_argument("--env_max_rew", type=float, default=None)
 
     parser.add_argument("--use_meta_model",
+                        action="store_true")
+
+    parser.add_argument("--env_update_weights_and_alphas",
                         action="store_true")
 
     parser.add_argument("--env_disable_pairwise_alphas",
