@@ -218,7 +218,7 @@ class DRQN(RL_agent):
         h_targ, c_targ = self.init_hidden_states(batch_size=self.batch_size)
         h, c = self.init_hidden_states(batch_size=self.batch_size)
 
-        # TODO: Update method might contain mistakes check rl2_dqn
+        # Update method might, rl2_dqn
         q_values, _, _ = self.online_network(obs, h, c)
         q_value = q_values.gather(2, act)
 

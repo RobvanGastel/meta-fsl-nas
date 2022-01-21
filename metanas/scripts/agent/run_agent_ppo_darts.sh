@@ -73,7 +73,7 @@ do
         --use_first_order_darts \
         --use_torchmeta_loader \
 
-        # TODO: Pick DARTS improvements
+        # Pick DARTS improvements
         # Custom DARTS adjustments
         # --dropout_skip_connections \
 

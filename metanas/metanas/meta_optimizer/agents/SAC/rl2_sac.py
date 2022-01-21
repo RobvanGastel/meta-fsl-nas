@@ -27,8 +27,6 @@ class SAC(RL_agent):
         super().__init__(config, env, logger_kwargs,
                          seed, gamma, lr, save_freq)
 
-        # TODO: Pick number of steps or trajectories per trial
-
         # Meta-learning parameters
         self.epochs = epochs
         # Number of steps per trial
@@ -81,7 +79,6 @@ class SAC(RL_agent):
         obs_dim = env.observation_space.shape
         act_dim = env.action_space.shape
 
-        # TODO: Time steps currently not used in the
         # replay buffer to stay close to the idea of updating
         # on the whole trajectories for meta-learning purposes
         self.buffer = EpisodicBuffer(
