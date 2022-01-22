@@ -131,15 +131,11 @@ def set_rl_hyperparameters(config):
     config.logger_kwargs = setup_logger_kwargs(config.path,
                                                seed=config.seed)
 
-    # Environment variables
-    if bool(config.env_min_rew) ^ bool(config.env_max_rew):
-        raise RuntimeError("Reward range is not defined.")
-
     # Reward range
     config.max_rew = config.env_max_rew
     config.min_rew = config.env_min_rew
 
-    # TODO: Configure DARTS estimation
+    # Configure DARTS estimation
     config.update_weights_and_alphas = config.env_update_weights_and_alphas
     config.encourage_exploration = config.env_encourage_exploration
 

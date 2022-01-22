@@ -25,6 +25,8 @@ def worker_process(remote, env):
 
 class Worker:
     def __init__(self, env):
+        self.env = env
+
         self.child, parent = mp.Pipe()
         self.process = mp.Process(target=worker_process, args=(parent, env))
         self.process.start()
@@ -67,7 +69,9 @@ class Buffer:
             (self.n_workers, self.worker_steps), dtype=torch.long)
 
         if self.use_mask:
-            self.masks = torch.zeros(self.n_workers, act_dim, dtype=torch.bool)
+            self.masks = torch.zeros(
+                (self.n_workers, self.worker_steps, act_dim),
+                dtype=torch.float32)
 
         self.dones = np.zeros(
             (self.n_workers, self.worker_steps), dtype=np.bool)
@@ -102,7 +106,7 @@ class Buffer:
         }
 
         if self.use_mask:
-            samples['masks'] = self.masks
+            samples['masks'] = self.masks.bool()
 
         # Split data into sequences and apply zero-padding. Retrieve the
         # indices of dones as these are the last step of a whole episode

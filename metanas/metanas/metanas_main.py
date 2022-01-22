@@ -132,8 +132,9 @@ def meta_architecture_search(
         config.normalizer_temp_anneal_mode,
     )
     meta_model = _build_model(config, task_distribution, normalizer)
+
+    # share memory for multiprocessing
     meta_model.share_memory()
-    print(sum(p.numel() for p in meta_model.parameters() if p.requires_grad))
 
     # task & meta optimizer
     config, meta_optimizer = _init_meta_optimizer(
@@ -216,7 +217,8 @@ def _init_meta_rl_agent(config, meta_model):
     if config.agent == "random":
         agent = RandomAgent(config,
                             [env_normal, env_normal],
-                            steps_per_epoch=config.agent_steps_per_trial,
+                            seed=config.seed,
+                            steps_per_worker=config.agent_steps_per_trial,
                             logger_kwargs=config.logger_kwargs,
                             is_nas_env=True)
     elif config.agent == "ppo":
@@ -270,20 +272,20 @@ def meta_rl_optimization(
     # Update the meta_model for task-learner or meta update
     if meta_epoch <= config.warm_up_epochs:
         meta_model.load_state_dict(meta_state)
-    else:
-        if not config.use_meta_model:
-            normal_alphas = env_normal.get_max_alphas()
-            reduce_alphas = env_reduce.get_max_alphas()
+    # else:
+    #     if not config.use_meta_model:
+    #         normal_alphas = env_normal.get_max_alphas()
+    #         reduce_alphas = env_reduce.get_max_alphas()
 
-            meta_model.alpha_normal = nn.ParameterList()
-            meta_model.alpha_reduce = nn.ParameterList()
+    #         meta_model.alpha_normal = nn.ParameterList()
+    #         meta_model.alpha_reduce = nn.ParameterList()
 
-            for n_alpha, r_alpha in zip(normal_alphas, reduce_alphas):
-                meta_model.alpha_normal.append(nn.Parameter(n_alpha))
-                meta_model.alpha_reduce.append(nn.Parameter(r_alpha))
-        else:
-            max_meta_state = env_reduce.get_max_meta_model()
-            meta_model.load_state_dict(max_meta_state)
+    #         for n_alpha, r_alpha in zip(normal_alphas, reduce_alphas):
+    #             meta_model.alpha_normal.append(nn.Parameter(n_alpha))
+    #             meta_model.alpha_reduce.append(nn.Parameter(r_alpha))
+    #     else:
+    #         max_meta_state = env_reduce.get_max_meta_model()
+    #         meta_model.load_state_dict(max_meta_state)
 
     # Set task_info to None for metaD2A
     if config.use_metad2a_estimation:

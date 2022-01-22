@@ -224,6 +224,7 @@ class NasEnv(gym.Env):
         self.max_acc = 0.0
 
         self.max_meta_model = copy.deepcopy(meta_state)
+
         self.max_alphas = nn.ParameterList()
         if self.cell_type == "normal":
             for _, row in enumerate(self.meta_model.alpha_normal):
@@ -507,7 +508,7 @@ class NasEnv(gym.Env):
                         f"Cell type {self.cell_type} is not supported.")
 
         # Conditions to terminate the episode
-        done = self.step_count == self.max_ep_len or \
+        done = self.step_count == self.max_ep_len-1 or \
             self.acc_estimations == self.max_task_train_steps-1
 
         # Invalid action mask
@@ -524,10 +525,9 @@ class NasEnv(gym.Env):
             "illegal_edge_traversals": self.illegal_edge_traversals,
         }
 
-        # print(f"Step running time: {info_dict['running_time']}")
-
         # Final episode statistics
         if done:
+            print(self.step_count, self.acc_estimations)
             info_dict['path_graph'] = self.path_graph
             info_dict["acc_estimations"] = self.acc_estimations
             info_dict['alpha_adjustments'] = self.alpha_adjustments

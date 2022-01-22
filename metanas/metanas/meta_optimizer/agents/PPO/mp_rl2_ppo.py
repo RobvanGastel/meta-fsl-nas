@@ -57,7 +57,7 @@ class PPO(RL_agent):
         self.obs = np.zeros((self.n_workers,) + obs_dim, dtype=np.float32)
 
         if use_mask:
-            self.masks = np.zeros((self.n_workers,) + act_dim, dtype=np.bool)
+            self.masks = np.ones((self.n_workers, act_dim), dtype=np.float32)
 
         # Initialize environment workers
         self.workers = [Worker(env) for env in envs]
@@ -76,7 +76,7 @@ class PPO(RL_agent):
         # self.optimizer = AdamW(self.ac.parameters(), lr=lr)
 
         # Load existing model
-        if model_path is not None:
+        if model_path['model'] and model_path['vars']:
             meta_state = torch.load(model_path['model'])
             self.ac.load_state_dict(meta_state['ac'].state_dict())
             self.optimizer.load_state_dict(meta_state['opt'].state_dict())
@@ -112,13 +112,15 @@ class PPO(RL_agent):
         assert len(envs) == self.n_workers, \
             "The number of environments should equal to the number of workers"
 
+        self.acc_estimated = False
+
         self.workers = [Worker(env) for env in envs]
 
     def run_test_trial(self):
         """Run single meta-reinforcement learning testing trial for a given
         number of worker steps.
         """
-        start_time = time.time()
+
         # Track statistics
         ep_stats = {'ep_len': np.zeros(2), 'ep_rew': np.zeros(2)}
 
@@ -143,7 +145,8 @@ class PPO(RL_agent):
 
         for t in range(self.steps_per_worker):
             actions, _, _, self.hidden_states = self.get_action(
-                torch.tensor(self.obs), prev_act, prev_rew, self.hidden_states)
+                torch.tensor(self.obs), prev_act, prev_rew,
+                self.hidden_states, self.masks)
 
             # Send actions to the environments
             for w, worker in enumerate(self.workers):
@@ -183,7 +186,10 @@ class PPO(RL_agent):
                                       MetaTestEpLen=ep_stats['ep_len'][w])
 
                     worker.child.send(("reset", None))
-                    obs = worker.child.recv()
+                    if self.use_mask:
+                        self.obs[w], self.masks[w] = worker.child.recv()
+                    else:
+                        self.obs[w] = worker.child.recv()
 
                     # Reset statistics
                     ep_stats['ep_len'][w] = 0
@@ -203,7 +209,7 @@ class PPO(RL_agent):
 
         if self.is_nas_env:
             # Calculate final test reward, at the end of the episode
-            task_info = self.env.darts_evaluate_test_set()
+            task_info = self.workers[0].env.darts_evaluate_test_set()
             self.logger.store(MetaTestTestAcc=task_info.top1)
 
         self.log_test_trial()
@@ -239,8 +245,11 @@ class PPO(RL_agent):
             pass
 
         if self.is_nas_env:
+            if self.acc_estimated == False:
+                self.logger.store(Acc=0.0)
+
             # Calculate final test reward, at the end of the episode
-            task_info = self.env.darts_evaluate_test_set()
+            task_info = self.workers[0].env.darts_evaluate_test_set()
             self.logger.store(TestAcc=task_info.top1)
 
         # The number of trials = total epochs / epochs per trial
@@ -347,38 +356,35 @@ class PPO(RL_agent):
 
         for t in range(self.steps_per_worker):
 
-            # Store variables in buffer
-            self.buffer.obs[:, t] = torch.tensor(self.obs)
-            self.buffer.hxs[:, t] = self.hidden_states.squeeze(0)
-            if self.use_mask:
+            with torch.no_grad():
+                # Store variables in buffer
+                self.buffer.obs[:, t] = torch.tensor(self.obs)
                 self.buffer.masks[:, t] = torch.tensor(self.masks)
+                self.buffer.hxs[:, t] = self.hidden_states.squeeze(0)
 
-            actions, v, logp_a, self.hidden_states = self.get_action(
-                torch.tensor(self.obs), prev_act, prev_rew,
-                self.hidden_states)
+                actions, v, logp_a, self.hidden_states = self.get_action(
+                    torch.tensor(self.obs), prev_act, prev_rew,
+                    self.hidden_states, self.masks)
 
-            self.buffer.values[:, t] = v
-            self.buffer.actions[:, t] = actions
-            self.buffer.log_probs[:, t] = logp_a
+                self.buffer.values[:, t] = v
+                self.buffer.actions[:, t] = actions
+                self.buffer.log_probs[:, t] = logp_a
 
             # Send actions to the environments
             for w, worker in enumerate(self.workers):
-                worker.child.send(
-                    ("step", self.buffer.actions[w, t].cpu().numpy()))
+                # worker.child.send(
+                #     ("step", self.buffer.actions[w, t].cpu().numpy()))
+                worker.child.send(("step", actions[w]))
 
             # Retrieve step results from the environments
             for w, worker in enumerate(self.workers):
                 obs, rew, done, info = worker.child.recv()
 
-                if self.use_mask:
-                    self.masks[w] = info['mask']
-
                 self.buffer.rewards[w, t] = rew
                 self.buffer.dones[w, t] = done
 
-                # Additional RL2 storage
-                self.buffer.prev_rewards[w, t] = prev_rew[w]
-                self.buffer.prev_actions[w, t] = prev_act[w]
+                if self.use_mask:
+                    self.masks[w] = info['mask']
 
                 # Store temporary previous reward and action
                 prev_rew[w] = rew
@@ -388,20 +394,23 @@ class PPO(RL_agent):
                 ep_stats['ep_len'][w] += 1
                 ep_stats['ep_rew'][w] += rew
 
+                # DARTS environment logging
                 if self.is_nas_env:
-                    # DARTS environment logging
                     self._log_nas_info_dict(info)
 
                 # Check if done or timeout
-                if done or ep_stats['ep_len'][w] == self.max_ep_len:
-
+                if done:
+                    print(info)
                     # Store the information of the completed episode
                     # (e.g. total reward, episode length)
                     self.logger.store(EpRet=ep_stats['ep_rew'][w],
                                       EpLen=ep_stats['ep_len'][w])
 
                     worker.child.send(("reset", None))
-                    obs = worker.child.recv()
+                    if self.use_mask:
+                        self.obs[w], self.masks[w] = worker.child.recv()
+                    else:
+                        self.obs[w] = worker.child.recv()
 
                     # Reset statistics
                     ep_stats['ep_len'][w] = 0
@@ -410,12 +419,16 @@ class PPO(RL_agent):
                 # Store latest observations
                 self.obs[w] = obs
 
+            # Additional RL2 storage
+            self.buffer.prev_rewards[:, t] = torch.tensor(prev_rew)
+            self.buffer.prev_actions[:, t] = torch.tensor(prev_act)
+
             self.total_steps += self.n_workers
 
         # Calculate advantages
         _, last_value, _, _ = self.get_action(
             torch.tensor(self.obs), prev_act, prev_rew,
-            self.hidden_states)
+            self.hidden_states, self.masks)
         self.buffer.calc_advantages(last_value, self.gamma, self.lmbda)
 
     def log_trial(self, start_time, trial):
@@ -508,9 +521,11 @@ class PPO(RL_agent):
         Args:
             info_dict (dict): environment information dictionary
         """
+
         # Accuracy information
         acc = info_dict['acc']
         if acc is not None:
+            self.acc_estimated = True
             self.logger.store(Acc=info_dict['acc'])
 
             # TODO: If terminate on 100% accuracy.

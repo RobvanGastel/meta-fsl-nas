@@ -76,9 +76,7 @@ class RandomAgent(RL_agent):
                     if acc is not None:
                         self.logger.store(MetaTestAcc=info['acc'])
 
-                # Check if done or timeout
-                if done or ep_stats['ep_len'][w] == self.max_ep_len:
-
+                if done:
                     # Store the information of the completed episode
                     # (e.g. total reward, episode length)
                     self.logger.store(MetaTestEpRet=ep_stats['ep_rew'][w],
@@ -140,9 +138,7 @@ class RandomAgent(RL_agent):
                     # DARTS environment logging
                     self._log_nas_info_dict(info)
 
-                # Check if done or timeout
-                if done or ep_stats['ep_len'][w] == self.max_ep_len:
-
+                if done:
                     # Store the information of the completed episode
                     # (e.g. total reward, episode length)
                     self.logger.store(EpRet=ep_stats['ep_rew'][w],
