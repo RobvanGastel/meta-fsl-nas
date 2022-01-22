@@ -258,9 +258,7 @@ def meta_rl_optimization(
     task_info = agent.run_trial()
 
     time_delta = (time.time() - start)
-    config.logger.info(f"time: {time_delta/60}")
-
-    config.logger.info("Done")
+    config.logger.info(f"Meta-RL epoch {meta_epoch}, time: {time_delta/60}")
 
     if (meta_epoch % config.print_freq == 0) or \
             (meta_epoch == config.meta_epochs) and not test_phase:

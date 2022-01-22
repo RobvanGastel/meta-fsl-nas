@@ -478,7 +478,6 @@ class NasEnv(gym.Env):
         return self.max_meta_model
 
     def step(self, action):
-        # print(action)
         start = time.time()
 
         # Mutates the meta_model and the local state
@@ -528,7 +527,6 @@ class NasEnv(gym.Env):
 
         # Final episode statistics
         if done:
-            print(self.step_count, self.acc_estimations)
             info_dict['path_graph'] = self.path_graph
             info_dict["acc_estimations"] = self.acc_estimations
             info_dict['alpha_adjustments'] = self.alpha_adjustments

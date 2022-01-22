@@ -374,7 +374,6 @@ class PPO(RL_agent):
             for w, worker in enumerate(self.workers):
                 # worker.child.send(
                 #     ("step", self.buffer.actions[w, t].cpu().numpy()))
-                # print(actions)
                 worker.child.send(("step", actions[w].cpu().item()))
 
             # Retrieve step results from the environments
