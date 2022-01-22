@@ -255,7 +255,7 @@ def meta_rl_optimization(
     start = time.time()
 
     agent.set_task([env_normal, env_reduce])
-    agent.run_trial()
+    task_info = agent.run_trial()
 
     time_delta = (time.time() - start)
     config.logger.info(f"time: {time_delta/60}")
@@ -272,20 +272,20 @@ def meta_rl_optimization(
     # Update the meta_model for task-learner or meta update
     if meta_epoch <= config.warm_up_epochs:
         meta_model.load_state_dict(meta_state)
-    # else:
-    #     if not config.use_meta_model:
-    #         normal_alphas = env_normal.get_max_alphas()
-    #         reduce_alphas = env_reduce.get_max_alphas()
+    else:
+        if not config.use_meta_model:
+            normal_alphas = env_normal.get_max_alphas()
+            reduce_alphas = env_reduce.get_max_alphas()
 
-    #         meta_model.alpha_normal = nn.ParameterList()
-    #         meta_model.alpha_reduce = nn.ParameterList()
+            meta_model.alpha_normal = nn.ParameterList()
+            meta_model.alpha_reduce = nn.ParameterList()
 
-    #         for n_alpha, r_alpha in zip(normal_alphas, reduce_alphas):
-    #             meta_model.alpha_normal.append(nn.Parameter(n_alpha))
-    #             meta_model.alpha_reduce.append(nn.Parameter(r_alpha))
-    #     else:
-    #         max_meta_state = env_reduce.get_max_meta_model()
-    #         meta_model.load_state_dict(max_meta_state)
+            for n_alpha, r_alpha in zip(normal_alphas, reduce_alphas):
+                meta_model.alpha_normal.append(nn.Parameter(n_alpha))
+                meta_model.alpha_reduce.append(nn.Parameter(r_alpha))
+        else:
+            max_meta_state = env_reduce.get_max_meta_model()
+            meta_model.load_state_dict(max_meta_state)
 
     # Set task_info to None for metaD2A
     if config.use_metad2a_estimation:
