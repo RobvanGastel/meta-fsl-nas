@@ -478,6 +478,7 @@ class NasEnv(gym.Env):
         return self.max_meta_model
 
     def step(self, action):
+        # print(action)
         start = time.time()
 
         # Mutates the meta_model and the local state
