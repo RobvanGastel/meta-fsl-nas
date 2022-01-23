@@ -215,14 +215,14 @@ def _init_meta_rl_agent(config, meta_model):
         raise RuntimeError("One of the agent model paths is undefined.")
 
     if config.agent == "random":
-        agent = RandomAgent(config,
+        agent = RandomAgent(config, meta_model,
                             [env_normal, env_normal],
                             seed=config.seed,
                             steps_per_worker=config.agent_steps_per_trial,
                             logger_kwargs=config.logger_kwargs,
                             is_nas_env=True)
     elif config.agent == "ppo":
-        agent = PPO(config,
+        agent = PPO(config, meta_model,
                     [env_normal, env_normal],
                     logger_kwargs=config.logger_kwargs,
                     seed=config.seed,
@@ -330,7 +330,7 @@ def meta_rl_optimization(
     start = time.time()
 
     agent.set_task([env_normal, env_reduce])
-    start_time = agent.run_trial()
+    start_time, max_meta_state = agent.run_trial()
 
     config.logger.info(
         f"Meta epoch {meta_epoch}, time: {(time.time() - start)/60}")
@@ -360,7 +360,7 @@ def meta_rl_optimization(
         task_info = evaluate_test_set(
             config, task, meta_model)
     else:
-        # meta_model.load_state_dict(max_meta_state)
+        meta_model.load_state_dict(max_meta_state)
         task_info = evaluate_test_set(
             config, task, meta_model)
 

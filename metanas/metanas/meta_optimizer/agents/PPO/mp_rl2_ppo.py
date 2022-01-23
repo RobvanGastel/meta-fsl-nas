@@ -1,6 +1,7 @@
 import time
 import pickle
 
+import copy
 import torch
 from torch.optim import Adam
 import numpy as np
@@ -17,8 +18,8 @@ def masked_mean(tensor, mask):
 
 class PPO(RL_agent):
     def __init__(
-            self, config, envs, logger_kwargs=dict(), seed=42, gamma=0.99,
-            lr=3e-4, clip_ratio=0.2, lam=0.97, n_mini_batch=4,
+            self, config, meta_model, envs, logger_kwargs=dict(), seed=42,
+            gamma=0.99, lr=3e-4, clip_ratio=0.2, lam=0.97, n_mini_batch=4,
             target_kl=0.05, value_coef=0.25, entropy_coef=0.01, epochs=100,
             hidden_size=256, steps_per_worker=800, sequence_length=8,
             exploration_sampling=False, use_mask=False, model_path=None,
@@ -45,6 +46,9 @@ class PPO(RL_agent):
 
         self.epochs = epochs
         self.total_epochs = 0
+
+        self.max_acc = 0.0
+        self.max_meta_model = meta_model
 
         # Buffer variables
         self.n_workers = len(envs)
@@ -244,7 +248,7 @@ class PPO(RL_agent):
             pass
 
         if self.is_nas_env:
-            if self.acc_estimated == False:
+            if self.acc_estimated is False:
                 self.logger.store(Acc=0.0)
 
         #     # Calculate final test reward, at the end of the episode
@@ -254,7 +258,7 @@ class PPO(RL_agent):
         # # The number of trials = total epochs / epochs per trial
         # self.log_trial(start_time, self.total_epochs//self.epochs)
 
-        return start_time
+        return start_time, self.max_meta_model
         # if self.is_nas_env:
         #     return task_info
 
@@ -397,7 +401,7 @@ class PPO(RL_agent):
 
                 # DARTS environment logging
                 if self.is_nas_env:
-                    self._log_nas_info_dict(info)
+                    self._log_nas_info_dict(info, worker.meta_model)
 
                 if done:
                     # Store the information of the completed episode
@@ -529,6 +533,10 @@ class PPO(RL_agent):
             self.acc_estimated = True
             self.logger.store(Acc=info_dict['acc'])
 
+            if acc > self.max_acc:
+                self.max_acc = acc
+                self.max_meta_model = copy.deepcopy(
+                    self.meta_model.state_dict())
             # TODO: If terminate on 100% accuracy.
             # if acc > 0.99:
             #     terminate = True
