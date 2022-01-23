@@ -206,12 +206,12 @@ class PPO(RL_agent):
         except:
             pass
 
-        if self.is_nas_env:
-            # Calculate final test reward, at the end of the episode
-            task_info = self.workers[0].env.darts_evaluate_test_set()
-            self.logger.store(MetaTestTestAcc=task_info.top1)
+        # if self.is_nas_env:
+        #     # Calculate final test reward, at the end of the episode
+        #     task_info = self.workers[0].env.darts_evaluate_test_set()
+        #     self.logger.store(MetaTestTestAcc=task_info.top1)
 
-        self.log_test_trial()
+        # self.log_test_trial()
 
     def run_trial(self):
         """Run single meta-reinforcement learning trial for a given number
@@ -247,15 +247,16 @@ class PPO(RL_agent):
             if self.acc_estimated == False:
                 self.logger.store(Acc=0.0)
 
-            # Calculate final test reward, at the end of the episode
-            task_info = self.workers[0].env.darts_evaluate_test_set()
-            self.logger.store(TestAcc=task_info.top1)
+        #     # Calculate final test reward, at the end of the episode
+        #     task_info = self.workers[0].env.darts_evaluate_test_set()
+        #     self.logger.store(TestAcc=task_info.top1)
 
-        # The number of trials = total epochs / epochs per trial
-        self.log_trial(start_time, self.total_epochs//self.epochs)
+        # # The number of trials = total epochs / epochs per trial
+        # self.log_trial(start_time, self.total_epochs//self.epochs)
 
-        if self.is_nas_env:
-            return task_info
+        return start_time
+        # if self.is_nas_env:
+        #     return task_info
 
     def update_policy(self):
         for i in range(self.n_mini_batch):

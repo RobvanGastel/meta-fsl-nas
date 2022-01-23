@@ -4,7 +4,7 @@ import os
 import time
 import numpy as np
 import pickle
-from collections import OrderedDict
+from collections import OrderedDict, namedtuple
 
 import torch.multiprocessing as mp
 import torch
@@ -244,6 +244,81 @@ def _init_meta_rl_agent(config, meta_model):
     return agent
 
 
+def evaluate_test_set(config, task, meta_model):
+    """Final evaluation over the test set
+    """
+    # Set max_meta_model weights
+    # meta_model.load_state_dict(meta_state)
+
+    # for test data evaluation, turn off drop path
+    if config.drop_path_prob > 0.0:
+        meta_model.drop_path_prob(0.0)
+
+    # Also, remove skip-connection dropouts during evaluation,
+    # evaluation is on the train-test set.
+    meta_model.drop_out_skip_connections(0.0)
+
+    with torch.no_grad():
+        for batch_idx, batch in enumerate(task.test_loader):
+            x_test, y_test = batch
+            x_test = x_test.to(config.device, non_blocking=True)
+            y_test = y_test.to(config.device, non_blocking=True)
+
+            logits = meta_model(
+                x_test, sparsify_input_alphas=True,
+                disable_pairwise_alphas=config.env_disable_pairwise_alphas)
+
+            loss = meta_model.criterion(logits, y_test)
+            y_test_pred = logits.softmax(dim=1)
+
+            prec1, _ = utils.accuracy(logits, y_test, topk=(1, 5))
+
+    acc = prec1.item()
+
+    # Task info
+    w_task = OrderedDict(
+        {
+            layer_name: copy.deepcopy(layer_weight)
+            for layer_name, layer_weight in meta_model.named_weights()
+            if layer_weight.grad is not None
+        }
+    )
+
+    a_task = OrderedDict(
+        {
+            layer_name: copy.deepcopy(layer_alpha)
+            for layer_name, layer_alpha in meta_model.named_alphas()
+            if layer_alpha.grad is not None
+        }
+    )
+    genotype = meta_model.genotype()
+
+    task_info = namedtuple(
+        "task_info",
+        [
+            "genotype",
+            "top1",
+            "w_task",
+            "a_task",
+            "loss",
+            "y_test_pred",
+            "sparse_num_params",
+        ],
+    )
+    task_info.w_task = w_task
+    task_info.a_task = a_task
+    task_info.loss = loss
+    # y_test_pred = y_test_pred
+    task_info.y_test_pred = y_test_pred
+    task_info.genotype = genotype
+    task_info.top1 = acc
+
+    task_info.sparse_num_params = meta_model.get_sparse_num_params(
+        meta_model.alpha_prune_threshold
+    )
+    return task_info
+
+
 def meta_rl_optimization(
         config, task, env_normal, env_reduce, agent,
         meta_state, meta_model, meta_epoch, test_phase=False):
@@ -255,10 +330,10 @@ def meta_rl_optimization(
     start = time.time()
 
     agent.set_task([env_normal, env_reduce])
-    task_info = agent.run_trial()
+    start_time = agent.run_trial()
 
-    time_delta = (time.time() - start)
-    config.logger.info(f"Meta-RL epoch {meta_epoch}, time: {time_delta/60}")
+    config.logger.info(
+        f"Meta epoch {meta_epoch}, time: {(time.time() - start)/60}")
 
     if (meta_epoch % config.print_freq == 0) or \
             (meta_epoch == config.meta_epochs) and not test_phase:
@@ -268,22 +343,30 @@ def meta_rl_optimization(
         agent.logger.save_state(agent_vars, meta_epoch)
 
     # Update the meta_model for task-learner or meta update
-    if meta_epoch <= config.warm_up_epochs:
-        meta_model.load_state_dict(meta_state)
+    # if meta_epoch <= config.warm_up_epochs:
+    #     meta_model.load_state_dict(meta_state)
+    # else:
+    if not config.use_meta_model:
+        normal_alphas = env_normal.get_max_alphas()
+        reduce_alphas = env_reduce.get_max_alphas()
+
+        meta_model.alpha_normal = nn.ParameterList()
+        meta_model.alpha_reduce = nn.ParameterList()
+
+        for n_alpha, r_alpha in zip(normal_alphas, reduce_alphas):
+            meta_model.alpha_normal.append(nn.Parameter(n_alpha))
+            meta_model.alpha_reduce.append(nn.Parameter(r_alpha))
+
+        task_info = evaluate_test_set(
+            config, task, meta_model)
     else:
-        if not config.use_meta_model:
-            normal_alphas = env_normal.get_max_alphas()
-            reduce_alphas = env_reduce.get_max_alphas()
+        # meta_model.load_state_dict(max_meta_state)
+        task_info = evaluate_test_set(
+            config, task, meta_model)
 
-            meta_model.alpha_normal = nn.ParameterList()
-            meta_model.alpha_reduce = nn.ParameterList()
-
-            for n_alpha, r_alpha in zip(normal_alphas, reduce_alphas):
-                meta_model.alpha_normal.append(nn.Parameter(n_alpha))
-                meta_model.alpha_reduce.append(nn.Parameter(r_alpha))
-        else:
-            max_meta_state = env_reduce.get_max_meta_model()
-            meta_model.load_state_dict(max_meta_state)
+    agent.logger.store(TestAcc=task_info.top1)
+    # The number of trials = total epochs / epochs per trial
+    agent.log_trial(start_time, agent.total_epochs//agent.epochs)
 
     # Set task_info to None for metaD2A
     if config.use_metad2a_estimation:
