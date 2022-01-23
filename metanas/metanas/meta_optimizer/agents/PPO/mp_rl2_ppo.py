@@ -48,7 +48,9 @@ class PPO(RL_agent):
         self.total_epochs = 0
 
         self.max_acc = 0.0
-        self.max_meta_model = meta_model
+
+        self.meta_model = meta_model
+        self.max_meta_model = copy.deepcopy(meta_model)
 
         # Buffer variables
         self.n_workers = len(envs)
@@ -401,7 +403,7 @@ class PPO(RL_agent):
 
                 # DARTS environment logging
                 if self.is_nas_env:
-                    self._log_nas_info_dict(info, worker.meta_model)
+                    self._log_nas_info_dict(info)
 
                 if done:
                     # Store the information of the completed episode
