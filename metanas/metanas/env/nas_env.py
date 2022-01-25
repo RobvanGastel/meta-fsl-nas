@@ -78,7 +78,7 @@ class NasEnv(gym.Env):
                 )
 
                 self.a_optim = torch.optim.Adam(
-                    self.meta_model.reduce_alphas(),
+                    self.meta_model.alphas(),
                     self.config.alpha_lr,
                     betas=(0.0, 0.999),
                     weight_decay=self.config.alpha_weight_decay,
@@ -92,7 +92,7 @@ class NasEnv(gym.Env):
                 )
 
                 self.a_optim = torch.optim.Adam(
-                    self.meta_model.reduce_alphas(),
+                    self.meta_model.alphas(),
                     self.config.alpha_lr,
                     betas=(0.0, 0.999),
                     weight_decay=self.config.alpha_weight_decay,

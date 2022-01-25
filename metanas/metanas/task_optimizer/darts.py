@@ -291,7 +291,7 @@ class Darts:
         y_test_pred = y_test_pred
         task_info.y_test_pred = y_test_pred
         task_info.genotype = genotype
-        # task_info.top1 = top1
+        task_info.top1 = prec1
 
         task_info.sparse_num_params = self.model.get_sparse_num_params(
             self.model.alpha_prune_threshold

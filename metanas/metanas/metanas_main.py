@@ -337,9 +337,9 @@ def meta_rl_optimization(
 
     if (meta_epoch % config.print_freq == 0) or \
             (meta_epoch == config.meta_epochs) and not test_phase:
-        agent_vars = {"steps": agent.global_steps,
-                      "test_steps": agent.global_test_steps,
-                      "epoch": agent.current_epoch}
+        agent_vars = {"steps": agent.total_steps,
+                      "test_steps": agent.total_test_steps,
+                      "epoch": agent.total_epochs}
         agent.logger.save_state(agent_vars, meta_epoch)
 
     # Update the meta_model for task-learner or meta update
@@ -347,17 +347,6 @@ def meta_rl_optimization(
     #     meta_model.load_state_dict(meta_state)
     # else:
     if not config.use_meta_model:
-        # TODO: Refactor to get alphas from the meta_model
-        # normal_alphas = env_normal.get_max_alphas()
-        # reduce_alphas = env_reduce.get_max_alphas()
-
-        # meta_model.alpha_normal = nn.ParameterList()
-        # meta_model.alpha_reduce = nn.ParameterList()
-
-        # for n_alpha, r_alpha in zip(normal_alphas, reduce_alphas):
-        #     meta_model.alpha_normal.append(nn.Parameter(n_alpha))
-        #     meta_model.alpha_reduce.append(nn.Parameter(r_alpha))
-
         task_info = evaluate_test_set(
             config, task, meta_model)
     else:
@@ -705,12 +694,16 @@ def train(
             else:
                 # Train task-learner with max alphas from the meta-RL loop,
                 # on metaD2A reward estimation.
-                task_infos += [
-                    task_optimizer.step(
-                        task, epoch=meta_epoch,
-                        global_progress=global_progress
-                    )
-                ]
+                task_info = task_optimizer.step(
+                    task, epoch=meta_epoch,
+                    global_progress=global_progress
+                )
+
+                config.logger.info(
+                    f"Training accuracy: {task_info.top1}, loss: {task_info.loss}")
+
+                task_infos += [task_info]
+
             meta_model.load_state_dict(meta_state)
 
         time_be = time.time()

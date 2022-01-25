@@ -88,9 +88,9 @@ class PPO(RL_agent):
             self.optimizer.load_state_dict(meta_state['opt'].state_dict())
 
             vars_dict = pickle.load(open(model_path['vars'], 'r'))
-            self.steps_t = vars_dict['steps']
-            self.test_steps_t = vars_dict['test_steps']
-            self.current_epoch = vars_dict['epoch']
+            self.total_steps = vars_dict['steps']
+            self.total_test_steps = vars_dict['test_steps']
+            self.total_epochs = vars_dict['epoch']
 
             # Set up model saving
         self.logger.setup_pytorch_saver({'ac': self.ac, 'opt': self.optimizer})

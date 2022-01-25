@@ -77,7 +77,6 @@ class Buffer:
             (self.n_workers, self.worker_steps), dtype=np.bool)
         self.obs = torch.zeros(
             (self.n_workers, self.worker_steps) + obs_dim)
-        print(self.obs.shape)
 
         self.hxs = torch.zeros(
             (self.n_workers, self.worker_steps, hidden_size))
