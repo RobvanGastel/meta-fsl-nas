@@ -131,6 +131,8 @@ def set_rl_hyperparameters(config):
     config.logger_kwargs = setup_logger_kwargs(config.path,
                                                seed=config.seed)
 
+    config.env_max_ep_len = 200
+
     # Reward range
     config.max_rew = config.env_max_rew
     config.min_rew = config.env_min_rew

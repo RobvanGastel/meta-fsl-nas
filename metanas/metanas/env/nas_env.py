@@ -102,9 +102,7 @@ class NasEnv(gym.Env):
                 self.meta_model,
                 self.config.w_momentum,
                 self.config.w_weight_decay,
-                self.config.use_first_order_darts,
-                cell_type
-            )
+                self.config.use_first_order_darts)
 
         # Episode step counter
         self.step_count = 0

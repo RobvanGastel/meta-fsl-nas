@@ -206,8 +206,9 @@ def meta_architecture_search(
 def _init_meta_rl_agent(config, meta_model):
     # Dummy environment to set shapes and sizes
     env_normal = NasEnv(
-        config, meta_model, cell_type="normal",
+        config, meta_model, test_phase=False, cell_type="normal",
         reward_estimation=config.use_metad2a_estimation,
+        max_ep_len=config.env_max_ep_len,
         disable_pairwise_alphas=config.env_disable_pairwise_alphas)
 
     # If one of the model path is undefined raise error
@@ -648,12 +649,14 @@ def train(
 
     # Environment to learn reduction and normal cell
     env_normal = NasEnv(
-        config, meta_model, cell_type="normal",
+        config, meta_model, test_phase=False, cell_type="normal",
         reward_estimation=config.use_metad2a_estimation,
+        max_ep_len=config.env_max_ep_len,
         disable_pairwise_alphas=config.env_disable_pairwise_alphas)
     env_reduce = NasEnv(
-        config, meta_model, cell_type="reduce",
+        config, meta_model, test_phase=False, cell_type="reduce",
         reward_estimation=config.use_metad2a_estimation,
+        max_ep_len=config.env_max_ep_len,
         disable_pairwise_alphas=config.env_disable_pairwise_alphas)
 
     for meta_epoch in range(config.start_epoch, config.meta_epochs + 1):
@@ -903,13 +906,15 @@ def evaluate(config, meta_model, task_distribution, task_optimizer, agent):
 
     # Environment to learn reduction and normal cell
     env_normal = NasEnv(
-        config, meta_model, cell_type="normal",
+        config, meta_model, test_phase=True, cell_type="normal",
         reward_estimation=config.use_metad2a_estimation,
+        max_ep_len=config.env_max_ep_len,
         disable_pairwise_alphas=config.env_disable_pairwise_alphas)
 
     env_reduce = NasEnv(
-        config, meta_model, cell_type="reduce",
+        config, meta_model, test_phase=True, cell_type="reduce",
         reward_estimation=config.use_metad2a_estimation,
+        max_ep_len=config.env_max_ep_len,
         disable_pairwise_alphas=config.env_disable_pairwise_alphas)
 
     for eval_epoch in range(config.eval_epochs):
