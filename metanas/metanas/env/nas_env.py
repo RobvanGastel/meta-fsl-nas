@@ -1210,7 +1210,7 @@ def edge_become_topk(prev_dict, states, alphas, s_idx):
             return True
 
         # TODO: Is this necessary?
-        # return (prev_alphas[s_idx] < alphas[s_idx]).any()
+        return (prev_alphas[s_idx] < alphas[s_idx]).any()
 
     return False
 
