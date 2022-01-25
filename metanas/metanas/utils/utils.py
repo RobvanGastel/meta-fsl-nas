@@ -137,8 +137,13 @@ def set_rl_hyperparameters(config):
 
     # Configure DARTS estimation
     config.update_weights_and_alphas = config.env_update_weights_and_alphas
-    config.encourage_exploration = config.env_encourage_exploration
 
+    # Environment exploration
+    config.encourage_exploration = config.env_encourage_exploration
+    config.encourage_increase = 2.0
+    config.encourage_decrease = 0.0
+
+    config.env_alpha_probability = 0.6
     # Graph walk logging
     # config.graph_walk_index = config.start_epoch
     # config.graph_walk_path = os.path.join(config.path + "graph_walk.shlv")
@@ -152,7 +157,6 @@ def set_rl_hyperparameters(config):
         config.agent_lambda = 0.97
         config.agent_lr = 3e-4
         config.agent_n_mini_batch = 4
-        config.agent_update_freq = 10
         config.agent_seq_len = 16
 
         config.use_agent_mask = config.agent_use_mask

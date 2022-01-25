@@ -2,8 +2,8 @@ import math
 import copy
 import time
 import igraph
-
 from collections import OrderedDict, namedtuple
+
 import numpy as np
 
 import gym
@@ -14,10 +14,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as models
 
+from metanas.utils import utils
+
+import metanas.utils.genotypes as gt
 from metanas.task_optimizer.darts import CellArchitect
 from metanas.meta_predictor.meta_predictor import MetaPredictor
-import metanas.utils.genotypes as gt
-from metanas.utils import utils
 
 
 """Wrapper for the RL agent to interact with the meta-model in the outer-loop
@@ -50,10 +51,8 @@ class NasEnv(gym.Env):
         self.discrete_alphas = []
 
         # Store reward previous estimation
+        # TODO: Adjust
         self.baseline_acc = 0.0
-
-        # Store best alphas/or model obtained yet,
-        self.max_alphas = []
         self.max_acc = 0.0
 
         # Task acuracy estimator
@@ -129,6 +128,8 @@ class NasEnv(gym.Env):
         action_size = len(self.A) + 2*len(self. primitives)
         self.action_space = spaces.Discrete(action_size)
 
+        self.alpha_prob = config.env_alpha_probability
+
         # Tracking statistics
         self.init_tracking_vars()
 
@@ -137,15 +138,16 @@ class NasEnv(gym.Env):
         self.max_ep_len = max_ep_len  # max_steps per episode
 
         # Reward range
-        self.encourage_exploration = config.encourage_exploration
-        self.encourage_increase = 2.0
-        self.encourage_decrease = 0.0
-
         self.min_rew, self.max_rew = config.min_rew, config.max_rew
+
+        self.encourage_exploration = config.encourage_exploration
+        self.encourage_increase = config.encourage_increase
+        self.encourage_decrease = config.encourage_decrease
 
         self.reward_range = (self.min_rew, self.max_rew)
         if self.encourage_exploration:
-            self.reward_range = (self.min_rew, self.max_rew * 2.0)
+            self.reward_range = (
+                self.min_rew, self.max_rew * self.encourage_increase)
 
         # Initialize State / Observation space
         self.initialize_observation_space()
@@ -155,8 +157,9 @@ class NasEnv(gym.Env):
             self.meta_state = copy.deepcopy(meta_model.state_dict())
 
     def init_tracking_vars(self):
-        """Track environment stastics for logging
+        """Reset the statistics to track the trial
         """
+
         self.encourage_edges = {(i, j): 0
                                 for i in range(self.A_up.shape[0])
                                 for j in range(self.A_up.shape[1])
@@ -180,7 +183,8 @@ class NasEnv(gym.Env):
         self.illegal_edge_traversals = 0
 
     def reset(self):
-        """Reset the environment state"""
+        """Reset the environment state
+        """
         # Add clause for testing the environment in which the task
         # is not defined.
         assert not (self.current_task is None and self.test_env is False), \
@@ -210,7 +214,8 @@ class NasEnv(gym.Env):
         return self.current_state, mask
 
     def set_task(self, task, meta_state, test_phase=False):
-        """The meta-loop passes the task for the environment to solve"""
+        """The meta-loop passes the task for the environment to solve
+        """
 
         self.current_task = task
         self.meta_state = copy.deepcopy(meta_state)
@@ -223,21 +228,10 @@ class NasEnv(gym.Env):
         # Reset best alphas and accuracy for current trial
         self.max_acc = 0.0
 
-        self.max_meta_model = copy.deepcopy(meta_state)
-
-        self.max_alphas = nn.ParameterList()
-        if self.cell_type == "normal":
-            for _, row in enumerate(self.meta_model.alpha_normal):
-                self.max_alphas.append(
-                    nn.Parameter(row.to(self.config.device)))
-        elif self.cell_type == "reduce":
-            for _, row in enumerate(self.meta_model.alpha_reduce):
-                self.max_alphas.append(
-                    nn.Parameter(row.to(self.config.device)))
-        else:
-            raise RuntimeError(f"Cell type {self.cell_type} is not supported.")
-
     def initialize_observation_space(self):
+        """Initialize the observation space of the environment
+        """
+
         # Generate the internal states of the graph
         self.update_states()
 
@@ -349,6 +343,9 @@ class NasEnv(gym.Env):
         }
 
     def set_start_state(self):
+        """Set starting edge of the episode
+        """
+
         if self.config.use_env_random_start:
             # Random starting point
             idx = np.random.choice(range(len(self.encourage_edges)))
@@ -369,6 +366,17 @@ class NasEnv(gym.Env):
         return torch.log(x) + C
 
     def increase_op(self, row_idx, edge_idx, op_idx, prob=0.6):
+        """Increase alpha value for the given incoming connection of a node.
+
+        Args:
+            row_idx (int): the index of the node
+            edge_idx (int): the index of the node with the incoming connection
+            op_idx (int): the index of the operation
+            prob (float, optional): increase of the alpha. Defaults to 0.6.
+
+        Returns:
+            bool: whether the current state is mutated
+        """
         C = math.log(10.)
 
         # Set short-hands
@@ -408,6 +416,17 @@ class NasEnv(gym.Env):
         return False
 
     def decrease_op(self, row_idx, edge_idx, op_idx, prob=0.6):
+        """Decrease alpha value for the given incoming connection of a node.
+
+        Args:
+            row_idx (int): the index of the node
+            edge_idx (int): the index of the node with the incoming connection
+            op_idx (int): the index of the operation
+            prob (float, optional): increase of the alpha. Defaults to 0.6.
+
+        Returns:
+            bool: whether the current state is mutated
+        """
         C = math.log(10.)
 
         # Set short-hands
@@ -446,66 +465,58 @@ class NasEnv(gym.Env):
         return False
 
     def update_meta_model(self, increase, row_idx, edge_idx, op_idx):
-        """Adjust alpha value of the meta-model for a given element
-        and value
-
-        Raises:
-            RuntimeError: On passing invalid cell types
+        """Adjust alpha value for a given edge and operation.
         """
 
         if self.cell_type == "normal":
             if increase:
-                return self.increase_op(row_idx, edge_idx, op_idx)
-            return self.decrease_op(row_idx, edge_idx, op_idx)
+                return self.increase_op(row_idx, edge_idx, op_idx,
+                                        prob=self.alpha_prob)
+            return self.decrease_op(row_idx, edge_idx, op_idx,
+                                    prob=self.alpha_prob)
 
         elif self.cell_type == "reduce":
             if increase:
-                return self.increase_op(row_idx, edge_idx, op_idx)
-            return self.decrease_op(row_idx, edge_idx, op_idx)
+                return self.increase_op(row_idx, edge_idx, op_idx,
+                                        prob=self.alpha_prob)
+            return self.decrease_op(row_idx, edge_idx, op_idx,
+                                    prob=self.alpha_prob)
 
         else:
             raise RuntimeError(f"Cell type {self.cell_type} is not supported.")
 
     def render(self, mode='human'):
-        """Render the environment, according to the specified mode."""
+        """Render the environment, according to the specified mode.
+        """
         for row in self.states:
             print(row)
 
-    def get_max_alphas(self):
-        return self.max_alphas
-
-    def get_max_meta_model(self):
-        return self.max_meta_model
-
     def step(self, action):
+        """Perform the given action on the environment
+
+        Args:
+            action (int): action within the range of the action space
+
+        Returns:
+            numpy.array: The next observation
+            int: The step reward
+            bool: Whether the current episode is finished
+            dict: Episodic information
+        """
         start = time.time()
 
         # Mutates the meta_model and the local state
         action_info, reward, acc = self._perform_action(action)
 
         if acc is not None and acc > 0.0:
-            self.baseline_acc = acc
+            # Rolling average
+            # self.baseline_acc = acc
+
+            self.baseline_acc = (
+                (self.acc_estimations * self.baseline_acc + acc) / self.acc_estimations)
 
             if self.max_acc < acc:
                 self.max_acc = acc
-
-                # Max alphas and weights
-                self.max_meta_model = copy.deepcopy(
-                    self.meta_model.state_dict())
-
-                # Max alphas
-                self.max_alphas = nn.ParameterList()
-                if self.cell_type == "normal":
-                    for _, row in enumerate(self.meta_model.alpha_normal):
-                        self.max_alphas.append(
-                            nn.Parameter(row.to(self.config.device)))
-                elif self.cell_type == "reduce":
-                    for _, row in enumerate(self.meta_model.alpha_reduce):
-                        self.max_alphas.append(
-                            nn.Parameter(row.to(self.config.device)))
-                else:
-                    raise RuntimeError(
-                        f"Cell type {self.cell_type} is not supported.")
 
         # Conditions to terminate the episode
         done = self.step_count == self.max_ep_len-1 or \
@@ -576,14 +587,16 @@ class NasEnv(gym.Env):
                     reward, acc = self.compute_reward()
                     self.do_update = False
 
-                    if check_if_visited(self.encourage_edges,
-                                        cur_node, next_node):
+                    if not check_if_visited(self.encourage_edges,
+                                            cur_node, next_node):
 
                         # Increase the edge visists, (a, b) = (b,a)
                         increase_edge(self.encourage_edges,
                                       cur_node, next_node)
 
                         if self.encourage_exploration:
+
+                            # Increase first reward
                             if reward > 0.0:
                                 reward = reward * self.encourage_increase
                     else:
@@ -592,10 +605,17 @@ class NasEnv(gym.Env):
                                       cur_node, next_node)
 
                         if self.encourage_exploration:
+                            # Decrease later rewards
                             if reward > 0.0:
-                                # Decrease reward
-                                reward = reward * \
-                                    (self.encourage_decrease)
+
+                                multiplier = get_edge_vists(
+                                    self.encourage_edges, cur_node, next_node)
+
+                                dec_multi = 1
+                                for i in [self.encourage_decrease]*multiplier:
+                                    dec_multi *= i
+
+                                reward = reward * dec_multi
 
                 # States might change due to DARTS reward estimation
                 self.update_states()
@@ -603,11 +623,11 @@ class NasEnv(gym.Env):
                 # Action statistics
                 self.edge_traversals += 1
 
-                # Update running average
                 self.n_a_adj += 1
                 avg = self.avg_a_adj
                 n = self.n_a_adj
 
+                # Running average update
                 self.avg_a_adj = ((n-1) * avg + self.a_adj_trav)/n
 
                 self.a_adj_trav = 0
@@ -629,7 +649,7 @@ class NasEnv(gym.Env):
             row_idx, edge_idx = self.edge_to_alpha[(cur_node, next_node)]
             s_idx = self.edge_to_index[(cur_node, next_node)]
 
-            # True = increase
+            # True parameter indicates increase op
             update = self.update_meta_model(True,
                                             row_idx,
                                             edge_idx,
@@ -1012,80 +1032,6 @@ class NasEnv(gym.Env):
         acc = prec1.item()
         return acc
 
-    def darts_evaluate_test_set(self):
-        """Final evaluation over the test set
-        """
-        # Set max_meta_model weights
-        self.meta_model.load_state_dict(self.max_meta_model)
-
-        # for test data evaluation, turn off drop path
-        if self.config.drop_path_prob > 0.0:
-            self.meta_model.drop_path_prob(0.0)
-
-        # Also, remove skip-connection dropouts during evaluation,
-        # evaluation is on the train-test set.
-        self.meta_model.drop_out_skip_connections(0.0)
-
-        with torch.no_grad():
-            for batch_idx, batch in enumerate(self.current_task.test_loader):
-                x_test, y_test = batch
-                x_test = x_test.to(self.config.device, non_blocking=True)
-                y_test = y_test.to(self.config.device, non_blocking=True)
-
-                logits = self.meta_model(
-                    x_test, sparsify_input_alphas=True,
-                    disable_pairwise_alphas=self.disable_pairwise_alphas)
-
-                loss = self.meta_model.criterion(logits, y_test)
-                y_test_pred = logits.softmax(dim=1)
-
-                prec1, _ = utils.accuracy(logits, y_test, topk=(1, 5))
-
-        acc = prec1.item()
-
-        # Task info
-        w_task = OrderedDict(
-            {
-                layer_name: copy.deepcopy(layer_weight)
-                for layer_name, layer_weight in self.meta_model.named_weights()
-                if layer_weight.grad is not None
-            }
-        )
-
-        a_task = OrderedDict(
-            {
-                layer_name: copy.deepcopy(layer_alpha)
-                for layer_name, layer_alpha in self.meta_model.named_alphas()
-                if layer_alpha.grad is not None
-            }
-        )
-        genotype = self.meta_model.genotype()
-
-        task_info = namedtuple(
-            "task_info",
-            [
-                "genotype",
-                "top1",
-                "w_task",
-                "a_task",
-                "loss",
-                "y_test_pred",
-                "sparse_num_params",
-            ],
-        )
-        task_info.w_task = w_task
-        task_info.a_task = a_task
-        task_info.loss = loss
-        y_test_pred = y_test_pred
-        task_info.y_test_pred = y_test_pred
-        task_info.genotype = genotype
-        task_info.top1 = acc
-
-        task_info.sparse_num_params = self.meta_model.get_sparse_num_params(
-            self.meta_model.alpha_prune_threshold
-        )
-        return task_info
-
     def _meta_predictor_estimation(self, task):
         # Encode graph and dataset
         graph = self._meta_predictor_graph_preprocess()
@@ -1265,7 +1211,8 @@ def edge_become_topk(prev_dict, states, alphas, s_idx):
         if (prev_topk[s_idx] < topk[s_idx]):
             return True
 
-        return (prev_alphas[s_idx] < alphas[s_idx]).any()
+        # TODO: Is this necessary?
+        # return (prev_alphas[s_idx] < alphas[s_idx]).any()
 
     return False
 

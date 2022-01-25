@@ -347,15 +347,16 @@ def meta_rl_optimization(
     #     meta_model.load_state_dict(meta_state)
     # else:
     if not config.use_meta_model:
-        normal_alphas = env_normal.get_max_alphas()
-        reduce_alphas = env_reduce.get_max_alphas()
+        # TODO: Refactor to get alphas from the meta_model
+        # normal_alphas = env_normal.get_max_alphas()
+        # reduce_alphas = env_reduce.get_max_alphas()
 
-        meta_model.alpha_normal = nn.ParameterList()
-        meta_model.alpha_reduce = nn.ParameterList()
+        # meta_model.alpha_normal = nn.ParameterList()
+        # meta_model.alpha_reduce = nn.ParameterList()
 
-        for n_alpha, r_alpha in zip(normal_alphas, reduce_alphas):
-            meta_model.alpha_normal.append(nn.Parameter(n_alpha))
-            meta_model.alpha_reduce.append(nn.Parameter(r_alpha))
+        # for n_alpha, r_alpha in zip(normal_alphas, reduce_alphas):
+        #     meta_model.alpha_normal.append(nn.Parameter(n_alpha))
+        #     meta_model.alpha_reduce.append(nn.Parameter(r_alpha))
 
         task_info = evaluate_test_set(
             config, task, meta_model)
