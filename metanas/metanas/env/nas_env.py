@@ -17,7 +17,7 @@ import torchvision.models as models
 from metanas.utils import utils
 
 import metanas.utils.genotypes as gt
-from metanas.task_optimizer.darts import CellArchitect
+from metanas.task_optimizer.darts import Architect
 from metanas.meta_predictor.meta_predictor import MetaPredictor
 
 
@@ -69,36 +69,36 @@ class NasEnv(gym.Env):
             # DARTS estimation of the network is used
             self.task_train_steps = 0
 
-            if cell_type == "normal":
-                self.w_optim = torch.optim.Adam(
-                    self.meta_model.weights(),
-                    lr=self.config.w_lr,
-                    betas=(0.0, 0.999),
-                    weight_decay=self.config.w_weight_decay,
-                )
+            # if cell_type == "normal":
+            self.w_optim = torch.optim.Adam(
+                self.meta_model.weights(),
+                lr=self.config.w_lr,
+                betas=(0.0, 0.999),
+                weight_decay=self.config.w_weight_decay,
+            )
 
-                self.a_optim = torch.optim.Adam(
-                    self.meta_model.alphas(),
-                    self.config.alpha_lr,
-                    betas=(0.0, 0.999),
-                    weight_decay=self.config.alpha_weight_decay,
-                )
-            else:
-                self.w_optim = torch.optim.Adam(
-                    self.meta_model.weights(),
-                    lr=self.config.w_lr,
-                    betas=(0.0, 0.999),
-                    weight_decay=self.config.w_weight_decay,
-                )
+            self.a_optim = torch.optim.Adam(
+                self.meta_model.alphas(),
+                self.config.alpha_lr,
+                betas=(0.0, 0.999),
+                weight_decay=self.config.alpha_weight_decay,
+            )
+            # else:
+            #     self.w_optim = torch.optim.Adam(
+            #         self.meta_model.weights(),
+            #         lr=self.config.w_lr,
+            #         betas=(0.0, 0.999),
+            #         weight_decay=self.config.w_weight_decay,
+            #     )
 
-                self.a_optim = torch.optim.Adam(
-                    self.meta_model.alphas(),
-                    self.config.alpha_lr,
-                    betas=(0.0, 0.999),
-                    weight_decay=self.config.alpha_weight_decay,
-                )
+            #     self.a_optim = torch.optim.Adam(
+            #         self.meta_model.alphas(),
+            #         self.config.alpha_lr,
+            #         betas=(0.0, 0.999),
+            #         weight_decay=self.config.alpha_weight_decay,
+            #     )
 
-            self.architect = CellArchitect(
+            self.architect = Architect(
                 self.meta_model,
                 self.config.w_momentum,
                 self.config.w_weight_decay,

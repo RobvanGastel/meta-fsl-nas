@@ -61,7 +61,7 @@ def set_hyperparameter(config):
         config.n_train = 15
         config.batch_size = 20
         config.batch_size_test = 10
-        config.meta_batch_size = 5
+        config.meta_batch_size = 10
         config.w_lr = 0.005
         config.alpha_lr = 0.005
         config.w_meta_lr = 1.0
@@ -140,7 +140,7 @@ def set_rl_hyperparameters(config):
 
     # Environment exploration
     config.encourage_exploration = config.env_encourage_exploration
-    config.encourage_increase = 2.0
+    config.encourage_increase = 1.0
     config.encourage_decrease = 0.0
 
     config.env_alpha_probability = 0.6
