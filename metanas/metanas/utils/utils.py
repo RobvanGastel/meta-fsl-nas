@@ -61,7 +61,7 @@ def set_hyperparameter(config):
         config.n_train = 15
         config.batch_size = 20
         config.batch_size_test = 10
-        config.meta_batch_size = 10
+        config.meta_batch_size = 5
         config.w_lr = 0.005
         config.alpha_lr = 0.005
         config.w_meta_lr = 1.0

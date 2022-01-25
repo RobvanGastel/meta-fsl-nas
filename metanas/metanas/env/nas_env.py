@@ -71,7 +71,7 @@ class NasEnv(gym.Env):
 
             if cell_type == "normal":
                 self.w_optim = torch.optim.Adam(
-                    self.meta_model.reduce_weights(),
+                    self.meta_model.weights(),
                     lr=self.config.w_lr,
                     betas=(0.0, 0.999),
                     weight_decay=self.config.w_weight_decay,
@@ -85,7 +85,7 @@ class NasEnv(gym.Env):
                 )
             else:
                 self.w_optim = torch.optim.Adam(
-                    self.meta_model.reduce_weights(),
+                    self.meta_model.weights(),
                     lr=self.config.w_lr,
                     betas=(0.0, 0.999),
                     weight_decay=self.config.w_weight_decay,

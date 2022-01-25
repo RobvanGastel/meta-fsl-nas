@@ -369,6 +369,17 @@ def meta_rl_optimization(
     # The number of trials = total epochs / epochs per trial
     agent.log_trial(start_time, agent.total_epochs//agent.epochs)
 
+    normalizer = meta_model.normalizer
+    config.logger.info("####### ALPHA #######")
+    config.logger.info("# Alpha - normal")
+    for alpha in meta_model.alpha_normal:
+        config.logger.info(meta_model.apply_normalizer(alpha))
+
+    config.logger.info("\n# Alpha - reduce")
+    for alpha in meta_model.alpha_reduce:
+        config.logger.info(meta_model.apply_normalizer(alpha))
+    config.logger.info("#####################")
+
     # Set task_info to None for metaD2A
     if config.use_metad2a_estimation:
         task_info = None
