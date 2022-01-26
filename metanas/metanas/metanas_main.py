@@ -1353,6 +1353,8 @@ if __name__ == "__main__":
     parser.add_argument("--darts_estimation_steps",
                         type=int, default=7)
 
+    parser.add_argument("--tse_steps", type=int, default=2)
+
     parser.add_argument("--use_env_random_start",
                         action="store_true")
 

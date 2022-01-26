@@ -146,9 +146,6 @@ def set_rl_hyperparameters(config):
     config.encourage_decrease = 0.5
 
     config.env_alpha_probability = 0.4
-    # Graph walk logging
-    # config.graph_walk_index = config.start_epoch
-    # config.graph_walk_path = os.path.join(config.path + "graph_walk.shlv")
 
     # Agent configuration
     config.agent_epochs_per_trial = 3
