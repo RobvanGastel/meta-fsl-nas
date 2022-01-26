@@ -801,14 +801,14 @@ class SearchCNN(nn.Module):
         """
         s0 = s1 = self.stem(x)
 
-        if disable_pairwise_alphas:
-            if sparsify_input_alphas:
+        if sparsify_input_alphas:
 
-                # always sparsify edge alphas (keep only edge with max
-                # prob for each previous node)
-                weights_normal = sparsify_alphas(weights_normal)
-                weights_reduce = sparsify_alphas(weights_reduce)
+            # always sparsify edge alphas (keep only edge with max
+            # prob for each previous node)
+            weights_normal = sparsify_alphas(weights_normal)
+            weights_reduce = sparsify_alphas(weights_reduce)
 
+            if disable_pairwise_alphas:
                 if weights_in_normal is not None:
                     weights_in_normal = sparsify_hierarchical_alphas(
                         weights_in_normal, sparsify_input_alphas
