@@ -857,12 +857,8 @@ class NasEnv(gym.Env):
             loss = self.meta_model.criterion(logits, train_y)
             loss.backward()
 
-            if self.cell_type == "normal":
-                nn.utils.clip_grad_norm_(
-                    self.meta_model.normal_weights(), self.config.w_grad_clip)
-            else:
-                nn.utils.clip_grad_norm_(
-                    self.meta_model.reduce_weights(), self.config.w_grad_clip)
+            nn.utils.clip_grad_norm_(
+                self.meta_model.weights(), self.config.w_grad_clip)
 
             self.w_optim.step()
 
@@ -927,11 +923,11 @@ class NasEnv(gym.Env):
         self.w_optim.zero_grad()
 
         # Temporary backup for new architecture encoding
-        new_arch_params = copy.deepcopy(self.meta_model.alpha_normal)
+        new_arch_params = copy.deepcopy(self.meta_model._alphas)
 
         # Old weights are loaded, which also reverts the architecture encoding
         self.meta_model.load_state_dict(model_init)
-        for p1, p2 in zip(self.meta_model.alpha_normal, new_arch_params):
+        for p1, p2 in zip(self.meta_model._alphas, new_arch_params):
             p1.data = p2.data
 
         # Step 3 of Algorithm 3 - training weights after updating the
@@ -1003,14 +999,8 @@ class NasEnv(gym.Env):
             loss = self.meta_model.criterion(logits, train_y)
             loss.backward()
 
-            if self.cell_type == "normal":
-                nn.utils.clip_grad_norm_(
-                    self.meta_model.normal_weights(), self.config.w_grad_clip)
-            else:
-                nn.utils.clip_grad_norm_(
-                    self.meta_model.reduce_weights(), self.config.w_grad_clip)
-            # nn.utils.clip_grad_norm_(self.meta_model.weights(),
-            #                          self.config.w_grad_clip)
+            nn.utils.clip_grad_norm_(
+                self.meta_model.weights(), self.config.w_grad_clip)
             self.w_optim.step()
 
             # Obtain accuracy with gradient step
