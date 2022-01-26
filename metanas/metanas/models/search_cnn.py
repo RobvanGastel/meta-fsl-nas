@@ -808,7 +808,7 @@ class SearchCNN(nn.Module):
             weights_normal = sparsify_alphas(weights_normal)
             weights_reduce = sparsify_alphas(weights_reduce)
 
-            if disable_pairwise_alphas:
+            if not disable_pairwise_alphas:
                 if weights_in_normal is not None:
                     weights_in_normal = sparsify_hierarchical_alphas(
                         weights_in_normal, sparsify_input_alphas
