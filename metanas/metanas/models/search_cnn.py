@@ -801,7 +801,7 @@ class SearchCNN(nn.Module):
         """
         s0 = s1 = self.stem(x)
 
-        if not disable_pairwise_alphas:
+        if disable_pairwise_alphas:
             if sparsify_input_alphas:
 
                 # always sparsify edge alphas (keep only edge with max
