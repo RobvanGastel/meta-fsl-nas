@@ -309,7 +309,6 @@ def evaluate_test_set(config, task, meta_model):
     task_info.w_task = w_task
     task_info.a_task = a_task
     task_info.loss = loss
-    # y_test_pred = y_test_pred
     task_info.y_test_pred = y_test_pred
     task_info.genotype = genotype
     task_info.top1 = acc

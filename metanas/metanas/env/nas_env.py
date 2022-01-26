@@ -602,18 +602,18 @@ class NasEnv(gym.Env):
                         increase_edge(self.encourage_edges,
                                       cur_node, next_node)
 
-                        if self.encourage_exploration:
-                            # Decrease later rewards
-                            if reward > 0.0:
+                        # if self.encourage_exploration:
+                        #     # Decrease later rewards
+                        #     if reward > 0.0:
 
-                                multiplier = get_edge_vists(
-                                    self.encourage_edges, cur_node, next_node)
+                        #         multiplier = get_edge_vists(
+                        #             self.encourage_edges, cur_node, next_node)
 
-                                dec_multi = 1
-                                for i in [self.encourage_decrease]*multiplier:
-                                    dec_multi *= i
+                        #         dec_multi = 1
+                        #         for i in [self.encourage_decrease]*multiplier:
+                        #             dec_multi *= i
 
-                                reward = reward * dec_multi
+                        #         reward = reward * dec_multi
 
                 # States might change due to DARTS reward estimation
                 self.update_states()
