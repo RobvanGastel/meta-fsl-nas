@@ -687,24 +687,25 @@ def train(
                 config, task, env_normal, env_reduce, agent,
                 meta_state, meta_model, meta_epoch, test_phase=False)
 
-            if task_info is not None:
-                # Use information of the training during the meta-RL loop.
-                task_infos += [task_info]
+            # if task_info is not None:
+            #     # Use information of the training during the meta-RL loop.
+            #     task_infos += [task_info]
 
-                config.top1_logger.update(task_info.top1, 1)
-                config.losses_logger.update(task_info.loss, 1)
-            else:
-                # Train task-learner with max alphas from the meta-RL loop,
-                # on metaD2A reward estimation.
-                task_info = task_optimizer.step(
-                    task, epoch=meta_epoch,
-                    global_progress=global_progress
-                )
+            #     config.top1_logger.update(task_info.top1, 1)
+            #     config.losses_logger.update(task_info.loss, 1)
+            # else:
+            # Train task-learner with max alphas from the meta-RL loop,
+            # on metaD2A reward estimation.
 
-                config.logger.info(
-                    f"Training accuracy: {task_info.top1}, loss: {task_info.loss}")
+            task_info = task_optimizer.step(
+                task, epoch=meta_epoch,
+                global_progress=global_progress
+            )
 
-                task_infos += [task_info]
+            config.logger.info(
+                f"Training accuracy: {task_info.top1}, loss: {task_info.loss}")
+
+            task_infos += [task_info]
 
             meta_model.load_state_dict(meta_state)
 

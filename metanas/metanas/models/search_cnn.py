@@ -179,17 +179,9 @@ class SearchCNNController(nn.Module):
 
         # setup alphas list
         self._alphas = []
-        self._normal_alphas = []
-        self._reduce_alphas = []
         for n, p in self.named_parameters():
             if "alpha" in n:
                 self._alphas.append((n, p))
-
-            if "alpha_normal" in n:
-                self._normal_alphas.append((n, p))
-
-            if "alpha_reduce" in n:
-                self._reduce_alphas.append((n, p))
 
         print(f"Using dropout on skip-connections {dropout_skip_connections}")
         self.net = SearchCNN(
@@ -635,30 +627,6 @@ class SearchCNNController(nn.Module):
 
     def named_weights_with_net(self):
         return self.named_parameters()
-
-    def normal_weights(self):
-        params = list()
-        for _, cell in enumerate(self.net.cells):
-            if not cell.reduction:
-                p = cell.parameters()
-                params.extend(list(p))
-        return params
-
-    def reduce_weights(self):
-        params = list()
-        for _, cell in enumerate(self.net.cells):
-            if cell.reduction:
-                p = cell.parameters()
-                params.extend(list(p))
-        return params
-
-    def reduce_alphas(self):
-        for n, p in self._reduce_alphas:
-            yield p
-
-    def normal_alphas(self):
-        for n, p in self._normal_alphas:
-            yield p
 
     def alphas(self):
         for n, p in self._alphas:

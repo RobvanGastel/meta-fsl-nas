@@ -927,7 +927,7 @@ class NasEnv(gym.Env):
 
         # Old weights are loaded, which also reverts the architecture encoding
         self.meta_model.load_state_dict(model_init)
-        for p1, p2 in zip(self.meta_model._alphas, new_arch_params):
+        for (_, p1), (_, p2) in zip(self.meta_model._alphas, new_arch_params):
             p1.data = p2.data
 
         # Step 3 of Algorithm 3 - training weights after updating the
@@ -993,8 +993,9 @@ class NasEnv(gym.Env):
                 self.config.device), train_y.to(self.config.device)
 
             self.w_optim.zero_grad()
-            logits = self.meta_model(train_X,
-                                     disable_pairwise_alphas=self.disable_pairwise_alphas)
+            logits = self.meta_model(
+                train_X,
+                disable_pairwise_alphas=self.disable_pairwise_alphas)
 
             loss = self.meta_model.criterion(logits, train_y)
             loss.backward()
@@ -1004,8 +1005,9 @@ class NasEnv(gym.Env):
             self.w_optim.step()
 
             # Obtain accuracy with gradient step
-            logits = self.meta_model(train_X, sparsify_input_alphas=True,
-                                     disable_pairwise_alphas=self.disable_pairwise_alphas)
+            logits = self.meta_model(
+                train_X, sparsify_input_alphas=True,
+                disable_pairwise_alphas=self.disable_pairwise_alphas)
             prec1, _ = utils.accuracy(logits, train_y, topk=(1, 5))
 
         if (
