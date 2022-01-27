@@ -454,6 +454,7 @@ class PPO(RL_agent):
         if self.is_nas_env:
             log_board['Environment'] = [
                 'NumAlphaAdj', 'NumEstimations', 'Acc', 'TestAcc',
+                'TestFinetuneAcc', 'TestFinetuneLoss',
                 'NumEdgeTrav', 'NumIllegalEdgeTrav', 'NumAlphaAdjBeforeTrav',
                 'UniqueEdges']
 
@@ -491,6 +492,11 @@ class PPO(RL_agent):
                 'Acc', average_only=True, with_min_and_max=True)
             self.logger.log_tabular(
                 'TestAcc', average_only=True, with_min_and_max=True)
+
+            self.logger.log_tabular(
+                'TestFinetuneAcc', average_only=True, with_min_and_max=True)
+            self.logger.log_tabular(
+                'TestFinetuneLoss', average_only=True, with_min_and_max=True)
 
             self.logger.log_tabular('NumAlphaAdj', average_only=True)
             self.logger.log_tabular('NumEstimations', average_only=True)

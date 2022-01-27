@@ -714,7 +714,8 @@ class NasEnv(gym.Env):
                 acc = self._darts_weight_estimation(self.current_task)
 
         # Scale reward to (min_rew, max_rew) range, [-min, max]
-        reward = self.scale_reward(acc)
+        # reward = self.scale_reward(acc)
+        reward = self.scale_postive_reward(acc)
 
         return reward, acc
 
@@ -749,6 +750,24 @@ class NasEnv(gym.Env):
             b1, b2 = self.min_rew, 0.0
 
             reward = b1 + ((accuracy-a1)*(b2-b1)) / (a2-a1)
+        return reward
+
+    def scale_postive_reward(self, accuracy):
+        reward = 0.0
+
+        # Map accuracies smaller than the baseline to
+        # [-1, 0]
+        if self.baseline_acc == accuracy or self.baseline_acc >= accuracy:
+            return 0.0
+
+        # Map accuracies greater than the baseline to
+        # [0.5, 1]
+        if self.baseline_acc <= accuracy:
+            a1, a2 = self.baseline_acc, 1.0
+            b1, b2 = 0.5, self.max_rew
+
+            reward = b1 + ((accuracy-a1)*(b2-b1)) / (a2-a1)
+
         return reward
 
     def _init_darts_training(self):

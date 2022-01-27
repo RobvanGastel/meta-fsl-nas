@@ -325,18 +325,12 @@ def meta_rl_optimization(
 
     # # Set few-shot task
     env_normal.set_task(task, meta_state, test_phase)
-
-    start = time.time()
-
     agent.set_task([env_normal])
     start_time, max_meta_state = agent.run_trial()
-    env_reduce.set_task(task, max_meta_state, test_phase)
 
+    env_reduce.set_task(task, max_meta_state, test_phase)
     agent.set_task([env_reduce])
     start_time, max_meta_state = agent.run_trial()
-
-    config.logger.info(
-        f"Meta epoch {meta_epoch}, time: {(time.time() - start)/60}")
 
     if (meta_epoch % config.print_freq == 0) or \
             (meta_epoch == config.meta_epochs) and not test_phase:
@@ -357,11 +351,6 @@ def meta_rl_optimization(
         task_info = evaluate_test_set(
             config, task, meta_model)
 
-    agent.logger.store(TestAcc=task_info.top1)
-    # The number of trials = total epochs / epochs per trial
-    agent.log_trial(start_time, agent.total_epochs//agent.epochs)
-
-    normalizer = meta_model.normalizer
     config.logger.info("####### ALPHA #######")
     config.logger.info("# Alpha - normal")
     for alpha in meta_model.alpha_normal:
@@ -685,6 +674,8 @@ def train(
         time_bs = time.time()
         for task in meta_train_batch:
 
+            start = time.time()
+
             # Meta-RL optimization
             task_info, meta_model = meta_rl_optimization(
                 config, task, env_normal, env_reduce, agent,
@@ -700,15 +691,24 @@ def train(
             # Train task-learner with max alphas from the meta-RL loop,
             # on metaD2A reward estimation.
 
+            # Accuracy before fine tuning
+            agent.logger.store(TestAcc=task_info.top1)
+
             task_info = task_optimizer.step(
                 task, epoch=meta_epoch,
                 global_progress=global_progress
             )
 
-            config.logger.info(
-                f"Training accuracy: {task_info.top1}, loss: {task_info.loss}")
-
             task_infos += [task_info]
+
+            config.logger.info(
+                f"Training fine-tune accuracy: {task_info.top1}")
+
+            agent.logger.store(TestFinetuneAcc=task_info.top1)
+            agent.logger.store(TestFinetuneLoss=task_info.loss)
+
+            # The number of trials = total epochs / epochs per trial
+            agent.log_trial(start, agent.total_epochs//agent.epochs)
 
             meta_model.load_state_dict(meta_state)
 
@@ -1356,7 +1356,7 @@ if __name__ == "__main__":
     parser.add_argument("--darts_estimation_steps",
                         type=int, default=7)
 
-    parser.add_argument("--tse_steps", type=int, default=2)
+    parser.add_argument("--tse_steps", type=int, default=1)
 
     parser.add_argument("--use_env_random_start",
                         action="store_true")

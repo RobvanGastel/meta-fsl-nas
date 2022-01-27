@@ -143,13 +143,13 @@ def set_rl_hyperparameters(config):
     # Environment exploration
     config.encourage_exploration = config.env_encourage_exploration
     config.encourage_increase = 2.0
-    config.encourage_decrease = 0.5
+    config.encourage_decrease = 0.25
 
     config.env_alpha_probability = 0.4
 
     # Agent configuration
     config.agent_epochs_per_trial = 3
-    config.agent_steps_per_epoch = 800
+    config.agent_steps_per_epoch = 500
 
     if config.agent == "ppo":
         config.gamma = 0.99
