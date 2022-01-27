@@ -217,14 +217,14 @@ def _init_meta_rl_agent(config, meta_model):
 
     if config.agent == "random":
         agent = RandomAgent(config, meta_model,
-                            [env_normal, env_normal],
+                            [env_normal],
                             seed=config.seed,
                             steps_per_worker=config.agent_steps_per_trial,
                             logger_kwargs=config.logger_kwargs,
                             is_nas_env=True)
     elif config.agent == "ppo":
         agent = PPO(config, meta_model,
-                    [env_normal, env_normal],
+                    [env_normal],
                     logger_kwargs=config.logger_kwargs,
                     seed=config.seed,
                     gamma=config.gamma,
@@ -325,11 +325,14 @@ def meta_rl_optimization(
 
     # # Set few-shot task
     env_normal.set_task(task, meta_state, test_phase)
-    env_reduce.set_task(task, meta_state, test_phase)
 
     start = time.time()
 
-    agent.set_task([env_normal, env_reduce])
+    agent.set_task([env_normal])
+    start_time, max_meta_state = agent.run_trial()
+    env_reduce.set_task(task, max_meta_state, test_phase)
+
+    agent.set_task([env_reduce])
     start_time, max_meta_state = agent.run_trial()
 
     config.logger.info(

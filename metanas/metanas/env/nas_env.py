@@ -51,7 +51,6 @@ class NasEnv(gym.Env):
         self.discrete_alphas = []
 
         # Store reward previous estimation
-        # TODO: Adjust
         self.baseline_acc = 0.0
         self.max_acc = 0.0
 
@@ -69,7 +68,6 @@ class NasEnv(gym.Env):
             # DARTS estimation of the network is used
             self.task_train_steps = 0
 
-            # if cell_type == "normal":
             self.w_optim = torch.optim.Adam(
                 self.meta_model.weights(),
                 lr=self.config.w_lr,
@@ -83,20 +81,6 @@ class NasEnv(gym.Env):
                 betas=(0.0, 0.999),
                 weight_decay=self.config.alpha_weight_decay,
             )
-            # else:
-            #     self.w_optim = torch.optim.Adam(
-            #         self.meta_model.weights(),
-            #         lr=self.config.w_lr,
-            #         betas=(0.0, 0.999),
-            #         weight_decay=self.config.w_weight_decay,
-            #     )
-
-            #     self.a_optim = torch.optim.Adam(
-            #         self.meta_model.alphas(),
-            #         self.config.alpha_lr,
-            #         betas=(0.0, 0.999),
-            #         weight_decay=self.config.alpha_weight_decay,
-            #     )
 
             self.architect = Architect(
                 self.meta_model,
@@ -260,6 +244,7 @@ class NasEnv(gym.Env):
         self.edge_to_alpha = {}
 
         # Define (normalized) alphas
+        # TODO: Use _get_normalized_alphas?
         if self.cell_type == "normal":
             # Idea of letting RL observe the normalized alphas,
             # and mutate the actual alpha values
@@ -602,18 +587,18 @@ class NasEnv(gym.Env):
                         increase_edge(self.encourage_edges,
                                       cur_node, next_node)
 
-                        # if self.encourage_exploration:
-                        #     # Decrease later rewards
-                        #     if reward > 0.0:
+                        if self.encourage_exploration:
+                            # Decrease later rewards
+                            if reward > 0.0:
 
-                        #         multiplier = get_edge_vists(
-                        #             self.encourage_edges, cur_node, next_node)
+                                multiplier = get_edge_vists(
+                                    self.encourage_edges, cur_node, next_node)
 
-                        #         dec_multi = 1
-                        #         for i in [self.encourage_decrease]*multiplier:
-                        #             dec_multi *= i
+                                dec_multi = 1
+                                for i in [self.encourage_decrease]*multiplier:
+                                    dec_multi *= i
 
-                        #         reward = reward * dec_multi
+                                reward = reward * dec_multi
 
                 # States might change due to DARTS reward estimation
                 self.update_states()
