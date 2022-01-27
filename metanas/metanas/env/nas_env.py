@@ -867,7 +867,7 @@ class NasEnv(gym.Env):
 
             # Obtain accuracy with gradient step
             logits = self.meta_model(
-                train_X, sparsify_input_alphas=True,
+                train_X,  # sparsify_input_alphas=True,
                 disable_pairwise_alphas=self.disable_pairwise_alphas)
             prec1, _ = utils.accuracy(logits, train_y, topk=(1, 5))
 
@@ -904,48 +904,48 @@ class NasEnv(gym.Env):
 
         lr = self.config.w_lr
 
+        # for unrolling_step in range(self.config.tse_steps):
+
         self.meta_model.zero_grad()
         model_init = copy.deepcopy(self.meta_model.state_dict())
 
-        for unrolling_step in range(self.config.tse_steps):
+        for step, (train_X, train_y) in enumerate(task.train_loader):
+            train_X, train_y = train_X.to(
+                self.config.device), train_y.to(self.config.device)
 
-            for step, (train_X, train_y) in enumerate(task.train_loader):
-                train_X, train_y = train_X.to(
-                    self.config.device), train_y.to(self.config.device)
+            # Step 1 of Algorithm 3 - collect TSE gradient
+            base_loss = self.meta_model.loss(train_X, train_y)
+            base_loss.backward()
 
-                # Step 1 of Algorithm 3 - collect TSE gradient
-                base_loss = self.meta_model.loss(train_X, train_y)
-                base_loss.backward()
-
-                self.w_optim.step()  # Train the weights during unrolling as normal,
-                # but the architecture gradients are not zeroed during the unrolling
-                self.w_optim.zero_grad()
-
-            # Step 2 of Algorithm 3 - update the architecture encoding using
-            # accumulated gradients
-            self.a_optim.step()
-            self.a_optim.zero_grad()  # Reset to get ready for new unrolling
+            self.w_optim.step()  # Train the weights during unrolling as normal,
+            # but the architecture gradients are not zeroed during the unrolling
             self.w_optim.zero_grad()
 
-            # Temporary backup for new architecture encoding
-            new_arch_params = copy.deepcopy(self.meta_model._alphas)
+        # Step 2 of Algorithm 3 - update the architecture encoding using
+        # accumulated gradients
+        self.a_optim.step()
+        self.a_optim.zero_grad()  # Reset to get ready for new unrolling
+        self.w_optim.zero_grad()
 
-            # Old weights are loaded, which also reverts the architecture encoding
-            self.meta_model.load_state_dict(model_init)
-            for (_, p1), (_, p2) in zip(self.meta_model._alphas, new_arch_params):
-                p1.data = p2.data
+        # Temporary backup for new architecture encoding
+        new_arch_params = copy.deepcopy(self.meta_model._alphas)
 
-            # Step 3 of Algorithm 3 - training weights after updating the
-            # architecture encoding
-            for step, (train_X, train_y) in enumerate(task.train_loader):
-                train_X, train_y = train_X.to(
-                    self.config.device), train_y.to(self.config.device)
-                base_loss = self.meta_model.loss(train_X, train_y)
-                base_loss.backward()
-                self.w_optim.step()
+        # Old weights are loaded, which also reverts the architecture encoding
+        self.meta_model.load_state_dict(model_init)
+        for (_, p1), (_, p2) in zip(self.meta_model._alphas, new_arch_params):
+            p1.data = p2.data
 
-                self.w_optim.zero_grad()
-                self.a_optim.zero_grad()
+        # Step 3 of Algorithm 3 - training weights after updating the
+        # architecture encoding
+        for step, (train_X, train_y) in enumerate(task.train_loader):
+            train_X, train_y = train_X.to(
+                self.config.device), train_y.to(self.config.device)
+            base_loss = self.meta_model.loss(train_X, train_y)
+            base_loss.backward()
+            self.w_optim.step()
+
+            self.w_optim.zero_grad()
+            self.a_optim.zero_grad()
 
         # Obtain accuracy with gradient step
         logits = self.meta_model(

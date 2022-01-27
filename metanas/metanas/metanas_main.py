@@ -343,13 +343,13 @@ def meta_rl_optimization(
     # if meta_epoch <= config.warm_up_epochs:
     #     meta_model.load_state_dict(meta_state)
     # else:
-    if not config.use_meta_model:
-        task_info = evaluate_test_set(
-            config, task, meta_model)
-    else:
-        meta_model.load_state_dict(max_meta_state)
-        task_info = evaluate_test_set(
-            config, task, meta_model)
+    meta_model.load_state_dict(max_meta_state)
+    # if not config.use_meta_model:
+    #     task_info = evaluate_test_set(
+    #         config, task, meta_model)
+    # else:
+    #     task_info = evaluate_test_set(
+    #         config, task, meta_model)
 
     config.logger.info("####### ALPHA #######")
     config.logger.info("# Alpha - normal")
@@ -692,7 +692,10 @@ def train(
             # on metaD2A reward estimation.
 
             # Accuracy before fine tuning
-            agent.logger.store(TestAcc=task_info.top1)
+
+            # TODO: Adjusted
+            agent.logger.store(TestAcc=0.0)
+            # agent.logger.store(TestAcc=task_info.top1)
 
             task_info = task_optimizer.step(
                 task, epoch=meta_epoch,
@@ -700,9 +703,6 @@ def train(
             )
 
             task_infos += [task_info]
-
-            config.logger.info(
-                f"Training fine-tune accuracy: {task_info.top1}")
 
             agent.logger.store(TestFinetuneAcc=task_info.top1)
             agent.logger.store(TestFinetuneLoss=task_info.loss)
