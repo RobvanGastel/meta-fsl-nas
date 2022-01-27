@@ -149,7 +149,7 @@ def set_rl_hyperparameters(config):
 
     # Agent configuration
     config.agent_epochs_per_trial = 3
-    config.agent_steps_per_epoch = 400
+    config.agent_steps_per_epoch = 800
 
     if config.agent == "ppo":
         config.gamma = 0.99
@@ -158,6 +158,7 @@ def set_rl_hyperparameters(config):
         config.agent_n_mini_batch = 4
         config.agent_seq_len = 16
 
+        # Illegal action masking
         config.use_agent_mask = config.agent_use_mask
 
         # E-RL2 sampling

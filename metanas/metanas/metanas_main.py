@@ -133,8 +133,8 @@ def meta_architecture_search(
     )
     meta_model = _build_model(config, task_distribution, normalizer)
 
-    # share memory for multiprocessing
-    meta_model.share_memory()
+    # Disabled share memory for multiprocessing
+    # meta_model.share_memory()
 
     # task & meta optimizer
     config, meta_optimizer = _init_meta_optimizer(
