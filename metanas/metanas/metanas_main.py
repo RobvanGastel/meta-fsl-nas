@@ -362,8 +362,8 @@ def meta_rl_optimization(
     config.logger.info("#####################")
 
     # Set task_info to None for metaD2A
-    if config.use_metad2a_estimation:
-        task_info = None
+    # if config.use_metad2a_estimation:
+    task_info = None
 
     return task_info, meta_model
 
