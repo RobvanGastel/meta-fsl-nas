@@ -694,7 +694,7 @@ def train(
             # Accuracy before fine tuning
 
             # TODO: Adjusted
-            agent.logger.store(TestAcc=0.0)
+            # agent.logger.store(TestAcc=0.0)
             # agent.logger.store(TestAcc=task_info.top1)
 
             task_info = task_optimizer.step(

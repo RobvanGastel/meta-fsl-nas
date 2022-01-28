@@ -119,6 +119,7 @@ class PPO(RL_agent):
             "The number of environments should equal to the number of workers"
 
         self.acc_estimated = False
+        self.max_acc = 0.0
 
         self.workers = [Worker(env) for env in envs]
 
@@ -252,6 +253,9 @@ class PPO(RL_agent):
         if self.is_nas_env:
             if self.acc_estimated is False:
                 self.logger.store(Acc=0.0)
+
+            # if self.max_acc == 0.0:
+            #     self.logger.store(MaxAcc=0.0)
 
         #     # Calculate final test reward, at the end of the episode
         #     task_info = self.workers[0].env.darts_evaluate_test_set()
@@ -453,7 +457,7 @@ class PPO(RL_agent):
 
         if self.is_nas_env:
             log_board['Environment'] = [
-                'NumAlphaAdj', 'NumEstimations', 'Acc', 'TestAcc',
+                'NumAlphaAdj', 'NumEstimations', 'Acc', 'MaxTrialAcc',
                 'TestFinetuneAcc', 'TestFinetuneLoss',
                 'NumEdgeTrav', 'NumIllegalEdgeTrav', 'NumAlphaAdjBeforeTrav',
                 'UniqueEdges']
@@ -490,8 +494,7 @@ class PPO(RL_agent):
         if self.is_nas_env:
             self.logger.log_tabular(
                 'Acc', average_only=True, with_min_and_max=True)
-            self.logger.log_tabular(
-                'TestAcc', average_only=True, with_min_and_max=True)
+            self.logger.log_tabular('MaxTrialAcc', average_only=True)
 
             self.logger.log_tabular(
                 'TestFinetuneAcc', average_only=True, with_min_and_max=True)
@@ -545,6 +548,8 @@ class PPO(RL_agent):
                 self.max_acc = acc
                 self.max_meta_model = copy.deepcopy(
                     self.meta_model.state_dict())
+
+                self.logger.store(MaxTrialAcc=acc)
             # TODO: If terminate on 100% accuracy.
             # if acc > 0.99:
             #     terminate = True

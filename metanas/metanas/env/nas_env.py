@@ -516,6 +516,7 @@ class NasEnv(gym.Env):
             "action_id": action,
             "action": action_info,
             "acc": acc,
+            "max_acc": self.max_acc,
             "running_time": time.time() - start,
             "illegal_edge_traversals": self.illegal_edge_traversals,
         }
