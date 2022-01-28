@@ -493,10 +493,10 @@ class NasEnv(gym.Env):
 
         if acc is not None and acc > 0.0:
             # Rolling average
-            # self.baseline_acc = acc
+            self.baseline_acc = acc
 
-            self.baseline_acc = (
-                (self.acc_estimations * self.baseline_acc + acc) / self.acc_estimations)
+            # self.baseline_acc = (
+            #     (self.acc_estimations * self.baseline_acc + acc) / self.acc_estimations)
 
             if self.max_acc < acc:
                 self.max_acc = acc
