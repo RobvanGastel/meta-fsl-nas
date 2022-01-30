@@ -247,20 +247,20 @@ class NasEnv(gym.Env):
             # TODO: Use _get_normalized_alphas?
             # Idea of letting RL observe the normalized alphas,
             # and mutate the actual alpha values
-            self.normalized_alphas = [
-                F.softmax(alpha, dim=-1).detach().cpu()
-                for alpha in self.meta_model.alpha_normal]
+            # self.normalized_alphas = [
+            #     F.softmax(alpha, dim=-1).detach().cpu()
+            #     for alpha in self.meta_model.alpha_normal]
 
-            # self.normalized_alphas = self.meta_model.normalized_normal_alphas()
+            self.normalized_alphas = self.meta_model.normalized_normal_alphas()
 
             self.alphas = [
                 alpha.detach().cpu()
                 for alpha in self.meta_model.alpha_normal]
 
         elif self.cell_type == "reduce":
-            self.normalized_alphas = [
-                F.softmax(alpha, dim=-1).detach().cpu()
-                for alpha in self.meta_model.alpha_reduce]
+            # self.normalized_alphas = [
+            #     F.softmax(alpha, dim=-1).detach().cpu()
+            #     for alpha in self.meta_model.alpha_reduce]
 
             # self.normalized_alphas = self.meta_model.normalized_reduce_alphas()
 
