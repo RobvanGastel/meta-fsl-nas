@@ -250,10 +250,6 @@ class RandomAgent(RL_agent):
         if acc is not None:
             self.logger.store(Acc=info_dict['acc'])
 
-            # TODO: If terminate on 100% accuracy.
-            # if acc > 0.99:
-            #     terminate = True
-
         self.logger.store(
             NumIllegalEdgeTrav=info_dict['illegal_edge_traversals'])
 

@@ -258,6 +258,7 @@ class Darts:
                         nodes=self.config.nodes,
                         num_of_skip_connections=num_of_skip_connections)
 
+                # TODO: How does the model look like without pairwise alphas
                 if isinstance(self.model, SearchCNNController):
                     logits = self.model(
                         x_test, sparsify_input_alphas=sparsify_input_alphas
@@ -356,7 +357,7 @@ def tse_train(
                 base_loss.backward()
                 w_optim.step()
 
-                # Apply grad clipping?
+                # TODO: Apply grad clipping?
                 # nn.utils.clip_grad_norm_(model.weights(), config.w_grad_clip)
 
                 w_optim.zero_grad()

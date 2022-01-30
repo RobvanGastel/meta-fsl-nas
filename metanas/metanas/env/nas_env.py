@@ -243,13 +243,15 @@ class NasEnv(gym.Env):
         self.edge_to_alpha = {}
 
         # Define (normalized) alphas
-        # TODO: Use _get_normalized_alphas?
         if self.cell_type == "normal":
+            # TODO: Use _get_normalized_alphas?
             # Idea of letting RL observe the normalized alphas,
             # and mutate the actual alpha values
             self.normalized_alphas = [
                 F.softmax(alpha, dim=-1).detach().cpu()
                 for alpha in self.meta_model.alpha_normal]
+
+            # self.normalized_alphas = self.meta_model.normalized_normal_alphas()
 
             self.alphas = [
                 alpha.detach().cpu()
@@ -259,6 +261,8 @@ class NasEnv(gym.Env):
             self.normalized_alphas = [
                 F.softmax(alpha, dim=-1).detach().cpu()
                 for alpha in self.meta_model.alpha_reduce]
+
+            # self.normalized_alphas = self.meta_model.normalized_reduce_alphas()
 
             self.alphas = [
                 alpha.detach().cpu()
@@ -714,8 +718,8 @@ class NasEnv(gym.Env):
 
         if self.max_acc < acc:
             self.max_acc = acc
-
-            reward += 0.5
+            # TODO: Option for bonus on max reward
+            # reward += 0.5
 
         return reward, acc
 
@@ -902,10 +906,7 @@ class NasEnv(gym.Env):
         if self.a_task_lr_scheduler is not None:
             self.a_task_lr_scheduler.step()
 
-        lr = self.config.w_lr
-
         # for unrolling_step in range(self.config.tse_steps):
-
         self.meta_model.zero_grad()
         model_init = copy.deepcopy(self.meta_model.state_dict())
 

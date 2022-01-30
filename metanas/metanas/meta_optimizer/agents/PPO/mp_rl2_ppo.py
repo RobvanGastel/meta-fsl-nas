@@ -128,7 +128,15 @@ class PPO(RL_agent):
         """
 
         # Track statistics
-        ep_stats = {'ep_len': np.zeros(2), 'ep_rew': np.zeros(2)}
+        ep_stats = {'ep_len': np.zeros(self.n_workers),
+                    'ep_rew': np.zeros(self.n_workers)}
+        # 'eps': np.zeros(self.n_workers)
+
+        # Compute final statistics
+        stats = {'MetaTestEpLen': [] * self.n_workers,
+                 'MetaTestEpRet': [] * self.n_workers,
+                 'MetaTestAcc': [] * self.n_workers,
+                 'MetaMaxAcc': [] * self.n_workers}
 
         # RL2 variables
         prev_act = np.zeros((self.n_workers,))
@@ -177,16 +185,20 @@ class PPO(RL_agent):
                 if self.is_nas_env:
                     acc = info['acc']
                     if acc is not None:
-                        self.logger.store(MetaTestAcc=info['acc'])
+                        stats['MetaTestAcc'][w].append(acc)
 
-                    if 'test_acc' in info:
-                        self.logger.store(MetaTestTestAcc=info['test_acc'])
+                        if acc > self.max_acc:
+                            self.max_acc = acc
+                            stats['MetaTestMaxAcc'][w].append(acc)
+
+                            self.max_meta_model = copy.deepcopy(
+                                self.meta_model.state_dict())
 
                 if done:
-                    # Store the information of the completed episode
+                    # Calclate the information of the completed episode
                     # (e.g. total reward, episode length)
-                    self.logger.store(MetaTestEpRet=ep_stats['ep_rew'][w],
-                                      MetaTestEpLen=ep_stats['ep_len'][w])
+                    stats['MetaTestEpLen'][w].append(ep_stats['ep_len'][w])
+                    stats['MetaTestEpRet'][w].append(ep_stats['ep_rew'][w])
 
                     worker.child.send(("reset", None))
                     if self.use_mask:
@@ -212,6 +224,20 @@ class PPO(RL_agent):
         except:
             pass
 
+        # Aggregate test statistics
+        trial_stats = {}
+        for key in stats.keys():
+
+            curr_stat = []
+            for w in range(self.n_workers):
+                curr_stat += stats[key]
+            trial_stats[key] = np.mean(curr_stat)
+
+        # Log test statistics
+        self.log_test_trial(trial_stats)
+
+        return self.max_meta_model
+
     def run_trial(self):
         """Run single meta-reinforcement learning trial for a given number
         of worker steps.
@@ -219,7 +245,6 @@ class PPO(RL_agent):
         Returns:
             dict: The final information dictionary of the trial
         """
-        start_time = time.time()
 
         for _ in range(self.epochs):
 
@@ -324,7 +349,8 @@ class PPO(RL_agent):
 
     def sample_training_data(self):
         # Track statistics
-        ep_stats = {'ep_len': np.zeros(2), 'ep_rew': np.zeros(2)}
+        ep_stats = {'ep_len': np.zeros(self.n_workers),
+                    'ep_rew': np.zeros(self.n_workers)}
 
         # RL2 variables
         prev_act = np.zeros((self.n_workers,))
@@ -414,7 +440,7 @@ class PPO(RL_agent):
             self.buffer.prev_rewards[:, t] = torch.tensor(prev_rew)
             self.buffer.prev_actions[:, t] = torch.tensor(prev_act)
 
-            self.total_steps += self.n_workers
+            self.total_test_steps += self.n_workers
 
         # Calculate advantages
         _, last_value, _, _ = self.get_action(
@@ -491,25 +517,25 @@ class PPO(RL_agent):
         self.logger.log_tabular('Time', time.time()-start_time)
         self.logger.dump_tabular()
 
-    def log_test_trial(self):
+    def log_test_trial(self, stats):
         """Log meta-test trial to tensorboard
         """
 
         log_board = {
-            'Performance': ['MetaTestEpRet', 'MetaTestEpLen']}
+            'Testing': ['MetaTestEpRet', 'MetaTestEpLen',
+                        'MetaTestAcc', 'MetaMaxAcc']}
 
-        # Ignore this metric for non-NAS environments
-        if self.is_nas_env:
-            log_board['Environment'] = ['MetaTestAcc', 'MetaTestTestAcc']
+        for key in log_board['Testing']:
+            self.summary_writer.add_scalar(
+                'Testing/Average'+key, stats[key], self.total_test_steps)
 
-        for key, value in log_board.items():
-            for val in value:
-                mean, std = self.logger.get_stats(val)
-                if key == 'Performance' or key == "Environment":
-                    self.summary_writer.add_scalar(
-                        key+'/Average'+val, mean, self.total_test_steps)
-                    self.summary_writer.add_scalar(
-                        key+'/Std'+val, std, self.total_test_steps)
+    def log_test_test_accuracy(self, task_info):
+        self.summary_writer.add_scalar(
+            'Testing/MetaTestTestFinetuneAcc',
+            task_info.top1, self.total_test_steps)
+        self.summary_writer.add_scalar(
+            'Testing/MetaTestTestFinetuneLoss',
+            task_info.loss, self.total_test_steps)
 
     def _log_nas_info_dict(self, info_dict):
         """Log info dict for NAS environment information
@@ -530,9 +556,6 @@ class PPO(RL_agent):
                     self.meta_model.state_dict())
 
                 self.logger.store(MaxTrialAcc=acc)
-            # TODO: If terminate on 100% accuracy.
-            # if acc > 0.99:
-            #     terminate = True
 
         self.logger.store(
             NumIllegalEdgeTrav=info_dict['illegal_edge_traversals'])

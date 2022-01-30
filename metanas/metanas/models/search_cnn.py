@@ -207,6 +207,14 @@ class SearchCNNController(nn.Module):
     def apply_normalizer(self, alpha):
         return self.normalizer["func"](alpha, self.normalizer["params"])
 
+    def normalized_normal_alphas(self):
+        return [self.apply_normalizer(
+            alpha) for alpha in self.alpha_normal]
+
+    def normalized_reduce_alphas(self):
+        return [self.apply_normalizer(
+            alpha) for alpha in self.alpha_reduce]
+
     def _get_normalized_alphas(self):
         weights_normal = [self.apply_normalizer(
             alpha) for alpha in self.alpha_normal]

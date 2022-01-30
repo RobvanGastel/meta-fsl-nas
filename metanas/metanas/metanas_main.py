@@ -245,120 +245,187 @@ def _init_meta_rl_agent(config, meta_model):
     return agent
 
 
-def evaluate_test_set(config, task, meta_model):
-    """Final evaluation over the test set
-    """
-    # Set max_meta_model weights
-    # meta_model.load_state_dict(meta_state)
+# def evaluate_test_set(config, task, meta_model):
+#     """Final evaluation over the test set
+#     """
+#     # Set max_meta_model weights
+#     # meta_model.load_state_dict(meta_state)
 
-    # for test data evaluation, turn off drop path
-    if config.drop_path_prob > 0.0:
-        meta_model.drop_path_prob(0.0)
+#     # for test data evaluation, turn off drop path
+#     if config.drop_path_prob > 0.0:
+#         meta_model.drop_path_prob(0.0)
 
-    # Also, remove skip-connection dropouts during evaluation,
-    # evaluation is on the train-test set.
-    meta_model.drop_out_skip_connections(0.0)
+#     # Also, remove skip-connection dropouts during evaluation,
+#     # evaluation is on the train-test set.
+#     meta_model.drop_out_skip_connections(0.0)
 
-    with torch.no_grad():
-        for batch_idx, batch in enumerate(task.test_loader):
-            x_test, y_test = batch
-            x_test = x_test.to(config.device, non_blocking=True)
-            y_test = y_test.to(config.device, non_blocking=True)
+#     with torch.no_grad():
+#         for batch_idx, batch in enumerate(task.test_loader):
+#             x_test, y_test = batch
+#             x_test = x_test.to(config.device, non_blocking=True)
+#             y_test = y_test.to(config.device, non_blocking=True)
 
-            logits = meta_model(
-                x_test, sparsify_input_alphas=True,
-                disable_pairwise_alphas=config.env_disable_pairwise_alphas)
+#             logits = meta_model(
+#                 x_test, sparsify_input_alphas=True,
+#                 disable_pairwise_alphas=config.env_disable_pairwise_alphas)
 
-            loss = meta_model.criterion(logits, y_test)
-            y_test_pred = logits.softmax(dim=1)
+#             loss = meta_model.criterion(logits, y_test)
+#             y_test_pred = logits.softmax(dim=1)
 
-            prec1, _ = utils.accuracy(logits, y_test, topk=(1, 5))
+#             prec1, _ = utils.accuracy(logits, y_test, topk=(1, 5))
 
-    acc = prec1.item()
+#     acc = prec1.item()
 
-    # Task info
-    w_task = OrderedDict(
-        {
-            layer_name: copy.deepcopy(layer_weight)
-            for layer_name, layer_weight in meta_model.named_weights()
-            if layer_weight.grad is not None
-        }
-    )
+#     # Task info
+#     w_task = OrderedDict(
+#         {
+#             layer_name: copy.deepcopy(layer_weight)
+#             for layer_name, layer_weight in meta_model.named_weights()
+#             if layer_weight.grad is not None
+#         }
+#     )
 
-    a_task = OrderedDict(
-        {
-            layer_name: copy.deepcopy(layer_alpha)
-            for layer_name, layer_alpha in meta_model.named_alphas()
-            if layer_alpha.grad is not None
-        }
-    )
-    genotype = meta_model.genotype()
+#     a_task = OrderedDict(
+#         {
+#             layer_name: copy.deepcopy(layer_alpha)
+#             for layer_name, layer_alpha in meta_model.named_alphas()
+#             if layer_alpha.grad is not None
+#         }
+#     )
+#     genotype = meta_model.genotype()
 
-    task_info = namedtuple(
-        "task_info",
-        [
-            "genotype",
-            "top1",
-            "w_task",
-            "a_task",
-            "loss",
-            "y_test_pred",
-            "sparse_num_params",
-        ],
-    )
-    task_info.w_task = w_task
-    task_info.a_task = a_task
-    task_info.loss = loss
-    task_info.y_test_pred = y_test_pred
-    task_info.genotype = genotype
-    task_info.top1 = acc
+#     task_info = namedtuple(
+#         "task_info",
+#         [
+#             "genotype",
+#             "top1",
+#             "w_task",
+#             "a_task",
+#             "loss",
+#             "y_test_pred",
+#             "sparse_num_params",
+#         ],
+#     )
+#     task_info.w_task = w_task
+#     task_info.a_task = a_task
+#     task_info.loss = loss
+#     task_info.y_test_pred = y_test_pred
+#     task_info.genotype = genotype
+#     task_info.top1 = acc
 
-    task_info.sparse_num_params = meta_model.get_sparse_num_params(
-        meta_model.alpha_prune_threshold
-    )
-    return task_info
+#     task_info.sparse_num_params = meta_model.get_sparse_num_params(
+#         meta_model.alpha_prune_threshold
+#     )
+#     return task_info
+
+
+def meta_test_rl_optimization(
+        config, task, env_normal, env_reduce, agent,
+        meta_state, meta_model, meta_epoch):
+
+    if not config.use_meta_model:
+        # Only update the alphas, not weights
+        # Normal cell environment
+        env_normal.set_task(task, meta_state, test_phase=True)
+        agent.set_task([env_normal])
+        max_meta_state = agent.run_test_trial()
+
+        # Get max normal alphas
+        meta_model.load_state_dict(max_meta_state)
+        alpha_normal = copy.deepcopy(meta_model.alpha_normal)
+
+        # Load max normal alphas in initial meta state
+        meta_model.load_state_dict(meta_state)
+        for p1, p2 in zip(meta_model.alpha_normal, alpha_normal):
+            p1.data = p2.data
+        meta_state = meta_model.state_dict()
+
+        # Reduce cell environment
+        env_reduce.set_task(task, meta_state, test_phase=True)
+        agent.set_task([env_reduce])
+        max_meta_state = agent.run_test_trial()
+
+        # Get max reduce alphas
+        meta_model.load_state_dict(max_meta_state)
+        alpha_reduce = copy.deepcopy(meta_model.alpha_reduce)
+
+        # Load max reduce alphas in initial meta state
+        meta_model.load_state_dict(meta_state)
+        for p1, p2 in zip(meta_model.alpha_reduce, alpha_reduce):
+            p1.data = p2.data
+    else:
+        # Adjust alphas and weights
+        env_normal.set_task(task, meta_state, test_phase=True)
+        agent.set_task([env_normal])
+        max_meta_state = agent.run_test_trial()
+
+        env_reduce.set_task(task, max_meta_state, test_phase=True)
+        agent.set_task([env_reduce])
+        max_meta_state = agent.run_test_trial()
+
+        meta_model.load_state_dict(max_meta_state)
+
+    # Debug logger alphas
+    config.logger.info("####### ALPHA #######")
+    config.logger.info("# Alpha - normal")
+    for alpha in meta_model.alpha_normal:
+        config.logger.info(meta_model.apply_normalizer(alpha))
+
+    config.logger.info("\n# Alpha - reduce")
+    for alpha in meta_model.alpha_reduce:
+        config.logger.info(meta_model.apply_normalizer(alpha))
+    config.logger.info("#####################")
+
+    return meta_model
 
 
 def meta_rl_optimization(
         config, task, env_normal, env_reduce, agent,
         meta_state, meta_model, meta_epoch, test_phase=False):
 
-    # # Set few-shot task
-    env_normal.set_task(task, meta_state, test_phase)
-    agent.set_task([env_normal])
-    max_meta_state = agent.run_trial()
-
-    # If use the max weights and alphas
     if not config.use_meta_model:
+        # Only update the alphas, not weights
+        # Normal cell environment
+        env_normal.set_task(task, meta_state, test_phase)
+        agent.set_task([env_normal])
+        max_meta_state = agent.run_trial()
 
-        # NORMAL
-        # Get max alphas for normal cell
+        # Get max normal alphas
         meta_model.load_state_dict(max_meta_state)
         alpha_normal = copy.deepcopy(meta_model.alpha_normal)
 
-        # Load initial meta state
+        # Load max normal alphas in initial meta state
         meta_model.load_state_dict(meta_state)
         for p1, p2 in zip(meta_model.alpha_normal, alpha_normal):
             p1.data = p2.data
         meta_state = meta_model.state_dict()
 
-        # REDUCE
-        # Run reduce cell with max normal alphas
+        # Reduce cell environment
         env_reduce.set_task(task, meta_state, test_phase)
         agent.set_task([env_reduce])
         max_meta_state = agent.run_trial()
 
+        # Get max reduce alphas
         meta_model.load_state_dict(max_meta_state)
         alpha_reduce = copy.deepcopy(meta_model.alpha_reduce)
 
+        # Load max reduce alphas in initial meta state
         meta_model.load_state_dict(meta_state)
         for p1, p2 in zip(meta_model.alpha_reduce, alpha_reduce):
             p1.data = p2.data
     else:
+        # Adjust alphas and weights
+        env_normal.set_task(task, meta_state, test_phase)
+        agent.set_task([env_normal])
+        max_meta_state = agent.run_trial()
+
         env_reduce.set_task(task, max_meta_state, test_phase)
         agent.set_task([env_reduce])
         max_meta_state = agent.run_trial()
 
+        meta_model.load_state_dict(max_meta_state)
+
+    # Save weights of the agent
     if (meta_epoch % config.print_freq == 0) or \
             (meta_epoch == config.meta_epochs) and not test_phase:
         agent_vars = {"steps": agent.total_steps,
@@ -366,14 +433,7 @@ def meta_rl_optimization(
                       "epoch": agent.total_epochs}
         agent.logger.save_state(agent_vars, meta_epoch)
 
-    # Update the meta_model for task-learner or meta update
-    # if meta_epoch <= config.warm_up_epochs:
-    #     meta_model.load_state_dict(meta_state)
-
-    # Decide final meta_model
-    if config.use_meta_model:
-        meta_model.load_state_dict(max_meta_state)
-
+    # Debug logger alphas
     config.logger.info("####### ALPHA #######")
     config.logger.info("# Alpha - normal")
     for alpha in meta_model.alpha_normal:
@@ -700,34 +760,18 @@ def train(
                 config, task, env_normal, env_reduce, agent,
                 meta_state, meta_model, meta_epoch, test_phase=False)
 
-            # if task_info is not None:
-            #     # Use information of the training during the meta-RL loop.
-            #     task_infos += [task_info]
-
-            #     config.top1_logger.update(task_info.top1, 1)
-            #     config.losses_logger.update(task_info.loss, 1)
-            # else:
-            # Train task-learner with max alphas from the meta-RL loop,
-            # on metaD2A reward estimation.
-
-            # Accuracy before fine tuning
-
-            # TODO: Adjusted
-            # agent.logger.store(TestAcc=0.0)
-            # agent.logger.store(TestAcc=task_info.top1)
-
             task_info = task_optimizer.step(
                 task, epoch=meta_epoch,
                 global_progress=global_progress
             )
-
-            task_infos += [task_info]
 
             agent.logger.store(TestFinetuneAcc=task_info.top1)
             agent.logger.store(TestFinetuneLoss=task_info.loss)
 
             # The number of trials = total epochs / epochs per trial
             agent.log_trial(start, agent.total_epochs//agent.epochs)
+
+            task_infos += [task_info]
 
             meta_model.load_state_dict(meta_state)
 
@@ -783,28 +827,22 @@ def train(
             for task in meta_test_batch:
 
                 # Meta-RL optimization
-                task_info, meta_model = meta_rl_optimization(
+                meta_model = meta_test_rl_optimization(
                     config, task, env_normal, env_reduce, agent,
-                    meta_state, meta_model, meta_epoch, test_phase=True)
+                    meta_state, meta_model, meta_epoch)
 
-                # Train task-learner with max alphas from the meta-RL loop,
-                # on metaD2A reward estimation.
-                if task_info is not None:
-                    task_infos += [task_info]
+                task_info = task_optimizer.step(
+                    task,
+                    epoch=meta_epoch,
+                    global_progress=global_progress,
+                    test_phase=True,
+                    num_of_skip_connections=config.limit_skip_connections,
+                )
+                task_infos += [task_info]
 
-                    config.top1_logger_test.update(task_info.top1, 1)
-                    config.losses_logger_test.update(task_info.loss, 1)
+                # Test logging accuracy and loss
+                agent.log_test_test_accuracy(task_info)
 
-                else:
-                    task_infos += [
-                        task_optimizer.step(
-                            task,
-                            epoch=meta_epoch,
-                            global_progress=global_progress,
-                            test_phase=True,
-                            num_of_skip_connections=config.limit_skip_connections,
-                        )
-                    ]
                 meta_model.load_state_dict(meta_state)
 
             config.logger.info(
@@ -948,30 +986,21 @@ def evaluate(config, meta_model, task_distribution, task_optimizer, agent):
         for task in meta_test_batch:
 
             # Meta-RL optimization
-            task_info, meta_model = meta_rl_optimization(
+            meta_model = meta_rl_optimization(
                 config, task, env_normal, env_reduce, agent,
                 meta_state, config.meta_epochs, eval_epoch, test_phase=False)
 
-            if task_info is not None:
-                # Use information of the training during the meta-RL loop.
-                task_infos += [task_info]
-
-                config.top1_logger_test.update(task_info.top1, 1)
-                config.losses_logger_test.update(task_info.loss, 1)
-            else:
-                # Train task-learner with max alphas from the meta-RL loop,
-                # on metaD2A reward estimation.
-                task_infos += [
-                    task_optimizer.step(
-                        task,
-                        epoch=config.meta_epochs,
-                        global_progress=global_progress,
-                        test_phase=True,
-                        alpha_logger=alpha_logger,
-                        sparsify_input_alphas=config.sparsify_input_alphas,
-                        num_of_skip_connections=config.limit_skip_connections
-                    )
-                ]
+            task_infos += [
+                task_optimizer.step(
+                    task,
+                    epoch=config.meta_epochs,
+                    global_progress=global_progress,
+                    test_phase=True,
+                    alpha_logger=alpha_logger,
+                    sparsify_input_alphas=config.sparsify_input_alphas,
+                    num_of_skip_connections=config.limit_skip_connections
+                )
+            ]
 
             # load meta state
             meta_model.load_state_dict(meta_state)
