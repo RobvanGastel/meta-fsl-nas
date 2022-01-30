@@ -326,11 +326,38 @@ def meta_rl_optimization(
     # # Set few-shot task
     env_normal.set_task(task, meta_state, test_phase)
     agent.set_task([env_normal])
-    start_time, max_meta_state = agent.run_trial()
+    max_meta_state = agent.run_trial()
 
-    env_reduce.set_task(task, max_meta_state, test_phase)
-    agent.set_task([env_reduce])
-    start_time, max_meta_state = agent.run_trial()
+    # If use the max weights and alphas
+    if not config.use_meta_model:
+
+        # NORMAL
+        # Get max alphas for normal cell
+        meta_model.load_state_dict(max_meta_state)
+        alpha_normal = copy.deepcopy(meta_model.alpha_normal)
+
+        # Load initial meta state
+        meta_model.load_state_dict(meta_state)
+        for p1, p2 in zip(meta_model.alpha_normal, alpha_normal):
+            p1.data = p2.data
+        meta_state = meta_model.state_dict()
+
+        # REDUCE
+        # Run reduce cell with max normal alphas
+        env_reduce.set_task(task, meta_state, test_phase)
+        agent.set_task([env_reduce])
+        max_meta_state = agent.run_trial()
+
+        meta_model.load_state_dict(max_meta_state)
+        alpha_reduce = copy.deepcopy(meta_model.alpha_reduce)
+
+        meta_model.load_state_dict(meta_state)
+        for p1, p2 in zip(meta_model.alpha_reduce, alpha_reduce):
+            p1.data = p2.data
+    else:
+        env_reduce.set_task(task, max_meta_state, test_phase)
+        agent.set_task([env_reduce])
+        max_meta_state = agent.run_trial()
 
     if (meta_epoch % config.print_freq == 0) or \
             (meta_epoch == config.meta_epochs) and not test_phase:
@@ -342,14 +369,10 @@ def meta_rl_optimization(
     # Update the meta_model for task-learner or meta update
     # if meta_epoch <= config.warm_up_epochs:
     #     meta_model.load_state_dict(meta_state)
-    # else:
-    meta_model.load_state_dict(max_meta_state)
-    # if not config.use_meta_model:
-    #     task_info = evaluate_test_set(
-    #         config, task, meta_model)
-    # else:
-    #     task_info = evaluate_test_set(
-    #         config, task, meta_model)
+
+    # Decide final meta_model
+    if config.use_meta_model:
+        meta_model.load_state_dict(max_meta_state)
 
     config.logger.info("####### ALPHA #######")
     config.logger.info("# Alpha - normal")
@@ -361,11 +384,7 @@ def meta_rl_optimization(
         config.logger.info(meta_model.apply_normalizer(alpha))
     config.logger.info("#####################")
 
-    # Set task_info to None for metaD2A
-    # if config.use_metad2a_estimation:
-    task_info = None
-
-    return task_info, meta_model
+    return meta_model
 
 
 def _init_alpha_normalizer(name, task_train_steps, t_max, t_min,
@@ -677,7 +696,7 @@ def train(
             start = time.time()
 
             # Meta-RL optimization
-            task_info, meta_model = meta_rl_optimization(
+            meta_model = meta_rl_optimization(
                 config, task, env_normal, env_reduce, agent,
                 meta_state, meta_model, meta_epoch, test_phase=False)
 

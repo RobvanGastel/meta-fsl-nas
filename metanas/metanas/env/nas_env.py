@@ -490,15 +490,8 @@ class NasEnv(gym.Env):
         # Mutates the meta_model and the local state
         action_info, reward, acc = self._perform_action(action)
 
-        # print(self.states)
-
         if acc is not None and acc > 0.0:
-            # Rolling average
             self.baseline_acc = acc
-
-            # self.baseline_acc = (
-            #     (self.acc_estimations * self.baseline_acc + acc) / self.acc_estimations)
-
             if self.max_acc < acc:
                 self.max_acc = acc
 
@@ -520,8 +513,6 @@ class NasEnv(gym.Env):
             "running_time": time.time() - start,
             "illegal_edge_traversals": self.illegal_edge_traversals,
         }
-
-        # print("step:", self.step_count, "acc:", acc)
 
         # Final episode statistics
         if done:

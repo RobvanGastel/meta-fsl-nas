@@ -48,7 +48,6 @@ class PPO(RL_agent):
         self.total_epochs = 0
 
         self.max_acc = 0.0
-
         self.meta_model = meta_model
         self.max_meta_model = copy.deepcopy(meta_model)
 
@@ -213,13 +212,6 @@ class PPO(RL_agent):
         except:
             pass
 
-        # if self.is_nas_env:
-        #     # Calculate final test reward, at the end of the episode
-        #     task_info = self.workers[0].env.darts_evaluate_test_set()
-        #     self.logger.store(MetaTestTestAcc=task_info.top1)
-
-        # self.log_test_trial()
-
     def run_trial(self):
         """Run single meta-reinforcement learning trial for a given number
         of worker steps.
@@ -254,19 +246,7 @@ class PPO(RL_agent):
             if self.acc_estimated is False:
                 self.logger.store(Acc=0.0)
 
-            # if self.max_acc == 0.0:
-            #     self.logger.store(MaxAcc=0.0)
-
-        #     # Calculate final test reward, at the end of the episode
-        #     task_info = self.workers[0].env.darts_evaluate_test_set()
-        #     self.logger.store(TestAcc=task_info.top1)
-
-        # # The number of trials = total epochs / epochs per trial
-        # self.log_trial(start_time, self.total_epochs//self.epochs)
-
-        return start_time, self.max_meta_model
-        # if self.is_nas_env:
-        #     return task_info
+        return self.max_meta_model
 
     def update_policy(self):
         for i in range(self.n_mini_batch):
