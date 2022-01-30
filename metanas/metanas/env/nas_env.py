@@ -187,6 +187,9 @@ class NasEnv(gym.Env):
         # Set starting edge for agent
         self.set_start_state()
 
+        # Reset best alphas and accuracy for current trial
+        self.max_acc = 0.0
+
         # Set baseline accuracy to scale the reward
         _, self.baseline_acc = self.compute_reward()
 
@@ -205,9 +208,6 @@ class NasEnv(gym.Env):
 
         # Test phase with adjusted DARTS training
         self.test_phase = test_phase
-
-        # Reset best alphas and accuracy for current trial
-        self.max_acc = 0.0
 
     def initialize_observation_space(self):
         """Initialize the observation space of the environment
@@ -492,8 +492,6 @@ class NasEnv(gym.Env):
 
         if acc is not None and acc > 0.0:
             self.baseline_acc = acc
-            if self.max_acc < acc:
-                self.max_acc = acc
 
         # Conditions to terminate the episode
         done = self.step_count == self.max_ep_len-1 or \
@@ -713,6 +711,11 @@ class NasEnv(gym.Env):
         # Scale reward to (min_rew, max_rew) range, [-min, max]
         # reward = self.scale_reward(acc)
         reward = self.scale_postive_reward(acc)
+
+        if self.max_acc < acc:
+            self.max_acc = acc
+
+            reward += 0.5
 
         return reward, acc
 
