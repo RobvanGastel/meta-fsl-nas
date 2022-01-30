@@ -262,7 +262,7 @@ class NasEnv(gym.Env):
             #     F.softmax(alpha, dim=-1).detach().cpu()
             #     for alpha in self.meta_model.alpha_reduce]
 
-            # self.normalized_alphas = self.meta_model.normalized_reduce_alphas()
+            self.normalized_alphas = self.meta_model.normalized_reduce_alphas()
 
             self.alphas = [
                 alpha.detach().cpu()
