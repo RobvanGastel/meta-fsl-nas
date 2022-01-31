@@ -104,13 +104,13 @@ def set_hyperparameter(config):
         config.w_task_anneal = 0
 
     elif config.hp_setting == "test_exp":  # setting for debugging MetaNAS
-        config.task_train_steps = 5
-        config.n_train = 5
-        config.batch_size = 5
-        config.batch_size_test = 5
-        config.meta_batch_size = 5
-        config.w_lr = 0.05
-        config.alpha_lr = 0.05
+        config.task_train_steps = 6
+        config.n_train = 15
+        config.batch_size = 20
+        config.batch_size_test = 10
+        config.meta_batch_size = 1
+        config.w_lr = 0.005
+        config.alpha_lr = 0.005
         config.w_meta_lr = 1.0
         config.a_meta_lr = 0.6
         config.a_meta_anneal = 0
@@ -149,7 +149,7 @@ def set_rl_hyperparameters(config):
 
     # Agent configuration
     config.agent_epochs_per_trial = 3
-    config.agent_steps_per_epoch = 400
+    config.agent_steps_per_epoch = 50
 
     if config.agent == "ppo":
         config.gamma = 0.99

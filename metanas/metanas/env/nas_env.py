@@ -875,11 +875,11 @@ class NasEnv(gym.Env):
                 disable_pairwise_alphas=self.disable_pairwise_alphas)
             prec1, _ = utils.accuracy(logits, train_y, topk=(1, 5))
 
-        if (
-            self.model_has_normalizer
-            and self.task_train_steps < (self.arch_adap_steps - 1)
-        ):
-            self.meta_model.normalizer["params"]["curr_step"] += 1
+        # if (
+        #     self.model_has_normalizer
+        #     and self.task_train_steps < (self.arch_adap_steps - 1)
+        # ):
+        #     self.meta_model.normalizer["params"]["curr_step"] += 1
 
         # Step increment
         self.task_train_steps += 1
@@ -954,11 +954,11 @@ class NasEnv(gym.Env):
             disable_pairwise_alphas=self.disable_pairwise_alphas)
         prec1, _ = utils.accuracy(logits, train_y, topk=(1, 5))
 
-        if (
-            self.model_has_normalizer
-            and self.task_train_steps < (self.arch_adap_steps - 1)
-        ):
-            self.meta_model.normalizer["params"]["curr_step"] += 1
+        # if (
+        #     self.model_has_normalizer
+        #     and self.task_train_steps < (self.arch_adap_steps - 1)
+        # ):
+        #     self.meta_model.normalizer["params"]["curr_step"] += 1
 
         # Step increment
         self.task_train_steps += 1
@@ -1016,13 +1016,13 @@ class NasEnv(gym.Env):
                 disable_pairwise_alphas=self.disable_pairwise_alphas)
             prec1, _ = utils.accuracy(logits, train_y, topk=(1, 5))
 
-        if (
-            self.model_has_normalizer
-            and self.task_train_steps < (self.arch_adap_steps - 1)
-        ):
-            self.meta_model.normalizer["params"]["curr_step"] += 1
+        # if (
+        #     self.model_has_normalizer
+        #     and self.task_train_steps < (self.arch_adap_steps - 1)
+        # ):
+            # self.meta_model.normalizer["params"]["curr_step"] += 1
 
-        # Step increment
+            # Step increment
         self.task_train_steps += 1
 
         acc = prec1.item()

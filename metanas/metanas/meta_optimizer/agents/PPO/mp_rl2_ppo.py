@@ -133,10 +133,10 @@ class PPO(RL_agent):
         # 'eps': np.zeros(self.n_workers)
 
         # Compute final statistics
-        stats = {'MetaTestEpLen': [] * self.n_workers,
-                 'MetaTestEpRet': [] * self.n_workers,
-                 'MetaTestAcc': [] * self.n_workers,
-                 'MetaMaxAcc': [] * self.n_workers}
+        stats = {'MetaTestEpLen': {i: [] for i in range(self.n_workers)},
+                 'MetaTestEpRet': {i: [] for i in range(self.n_workers)},
+                 'MetaTestAcc': {i: [] for i in range(self.n_workers)},
+                 'MetaTestMaxAcc': {i: [] for i in range(self.n_workers)}}
 
         # RL2 variables
         prev_act = np.zeros((self.n_workers,))
@@ -523,7 +523,7 @@ class PPO(RL_agent):
 
         log_board = {
             'Testing': ['MetaTestEpRet', 'MetaTestEpLen',
-                        'MetaTestAcc', 'MetaMaxAcc']}
+                        'MetaTestAcc', 'MetaTestMaxAcc']}
 
         for key in log_board['Testing']:
             self.summary_writer.add_scalar(

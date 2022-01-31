@@ -365,17 +365,6 @@ def meta_test_rl_optimization(
 
         meta_model.load_state_dict(max_meta_state)
 
-    # Debug logger alphas
-    config.logger.info("####### ALPHA #######")
-    config.logger.info("# Alpha - normal")
-    for alpha in meta_model.alpha_normal:
-        config.logger.info(meta_model.apply_normalizer(alpha))
-
-    config.logger.info("\n# Alpha - reduce")
-    for alpha in meta_model.alpha_reduce:
-        config.logger.info(meta_model.apply_normalizer(alpha))
-    config.logger.info("#####################")
-
     return meta_model
 
 
@@ -986,7 +975,7 @@ def evaluate(config, meta_model, task_distribution, task_optimizer, agent):
         for task in meta_test_batch:
 
             # Meta-RL optimization
-            meta_model = meta_rl_optimization(
+            meta_model = meta_test_rl_optimization(
                 config, task, env_normal, env_reduce, agent,
                 meta_state, config.meta_epochs, eval_epoch, test_phase=False)
 
