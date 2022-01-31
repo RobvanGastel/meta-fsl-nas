@@ -440,7 +440,7 @@ class PPO(RL_agent):
             self.buffer.prev_rewards[:, t] = torch.tensor(prev_rew)
             self.buffer.prev_actions[:, t] = torch.tensor(prev_act)
 
-            self.total_test_steps += self.n_workers
+            self.total_steps += self.n_workers
 
         # Calculate advantages
         _, last_value, _, _ = self.get_action(
