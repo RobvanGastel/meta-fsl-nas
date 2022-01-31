@@ -4,7 +4,7 @@ source /home/TUE/20184291/miniconda3/etc/profile.d/conda.sh
 source activate metanas
 
 # parameters
-EPOCHS=150
+EPOCHS=100
 WARM_UP=0
 SEEDS=(2)
 
@@ -20,7 +20,7 @@ echo "Start run ${AGENT}, variables: epochs = ${EPOCHS}, warm up variables = ${W
 
 for SEED in ${SEEDS}
 do
-    TRAIN_DIR=/home/TUE/20184291/meta-fsl-nas/metanas/results/${DATASET}_n${N}_k${K}/${AGENT}_metad2a_env_traj_50_w_betas/seed_$SEED
+    TRAIN_DIR=/home/TUE/20184291/meta-fsl-nas/metanas/results/${DATASET}_n${N}_k${K}/${AGENT}_tse_darts_env_1/seed_$SEED
 	mkdir -p $TRAIN_DIR
 
     args=(
@@ -37,7 +37,7 @@ do
         --test_adapt_steps 1.0 \
 
         --seed $SEED
-        
+
         # few shot params
         # examples per class
         --n $N \
@@ -81,9 +81,13 @@ do
         # --use_limit_skip_connection \
 
 		# Environment DARTS
-		--darts_estimation_steps 8 \
+        --use_meta_model \
+        --darts_estimation_steps 8 \
         --env_update_weights_and_alphas \
         --env_disable_pairwise_alphas \
+
+        # TSE darts
+        --use_tse_darts \
 
         # Environment
         --use_env_random_start \
@@ -92,17 +96,10 @@ do
         --env_min_rew 0.00 \
         --env_max_rew 1.00 \
 
-		# MetaD2A estimation
-		--use_metad2a_estimation \
-        --primitives_type nasbench201 \
-
-		--rew_data_path /home/TUE/20184291/meta-fsl-nas/metanas/data/ \
-        --rew_model_path /home/TUE/20184291/meta-fsl-nas/metanas/data/meta_predictor/predictor_max_corr.pt \
-
         # meta-RL agent
         --agent ${AGENT} \
         # E-RL2 batch sampling
-		--agent_exploration \
+        --agent_exploration \
         --agent_hidden_size 256 \
 
         # Use policy masking illegal actions

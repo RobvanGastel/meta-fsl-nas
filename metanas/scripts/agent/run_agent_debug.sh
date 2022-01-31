@@ -12,7 +12,7 @@ DATASET=omniglot
 N=1
 K=20
 DATASET_DIR=/home/rob/Git/meta-fsl-nas/data
-EVAL_FREQ=25
+EVAL_FREQ=1
 
 AGENT=ppo
 
@@ -31,7 +31,7 @@ do
         --path ${TRAIN_DIR} \
         --data_path ${DATASET_DIR} \
         --dataset $DATASET
-        --hp_setting 'og_metanas' \
+        --hp_setting 'test_exp' \
         --use_hp_setting 1 \
         --workers 0 \
         --gpus 0 \
@@ -80,20 +80,34 @@ do
         # # Default M=2,
         # --use_limit_skip_connection \
 
-		# Environment
-		--darts_estimation_steps 12 \
+        # Environment
+        --use_meta_model \
+        --darts_estimation_steps 8 \
+        --env_update_weights_and_alphas \
+        --env_disable_pairwise_alphas \
+
+        # --use_tse_darts \
+
         --use_env_random_start \
 
+        --env_encourage_exploration \
+        --env_min_rew -0.10 \
+        --env_max_rew 1.00 \
 
         # meta-RL optimization
         --agent ${AGENT} \
+        # E-RL2 batch sampling
+        --agent_exploration \
         --agent_hidden_size 256 \
+        
+        # Use policy masking illegal actions
+        --agent_use_mask \
 
 		# MetaD2A estimation
-		--use_metad2a_estimation \
-        --primitives_type nasbench201 \
-		--rew_model_path /home/rob/Git/meta_predictor/predictor_max_corr.pt \
-		--rew_data_path /home/rob/Git/meta-fsl-nas/data/predictor \
+		# --use_metad2a_estimation \
+        # --primitives_type nasbench201 \
+		# --rew_model_path /home/rob/Git/meta_predictor/predictor_max_corr.pt \
+		# --rew_data_path /home/rob/Git/meta-fsl-nas/data/predictor \
     )
 
 

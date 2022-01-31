@@ -11,7 +11,7 @@ SEEDS=(2)
 DATASET=omniglot
 N=1
 K=20
-DATASET_DIR=/home/rob/Git/meta-fsl-nas/data
+DATASET_DIR=/home/TUE/20184291/meta-fsl-nas/data
 EVAL_FREQ=25
 
 AGENT=ppo
@@ -20,7 +20,7 @@ echo "Start run ${AGENT}, variables: epochs = ${EPOCHS}, warm up variables = ${W
 
 for SEED in ${SEEDS}
 do
-    TRAIN_DIR=/home/rob/Git/meta-fsl-nas/metanas/results/${DATSASET}_n${N}_k${K}/${AGENT}_darts_env_1/seed_$SEED
+    TRAIN_DIR=/home/TUE/20184291/meta-fsl-nas/metanas/results/${DATASET}_n${N}_k${K}/${AGENT}_darts_env_1/seed_$SEED
 	mkdir -p $TRAIN_DIR
 
     args=(
@@ -80,16 +80,18 @@ do
         # Default M=2,
         # --use_limit_skip_connection \
 
-		# Environment
+		# Environment DARTS
+        --use_meta_model \
 		--darts_estimation_steps 8 \
         --env_update_weights_and_alphas \
         --env_disable_pairwise_alphas \
 
+        # Environment
         --use_env_random_start \
 
         --env_encourage_exploration \
-        --env_min_rew -0.10 \
-        --env_max_rew 2.00 \
+        --env_min_rew 0.00 \
+        --env_max_rew 1.00 \
         
         # meta-RL agent
         --agent ${AGENT} \
