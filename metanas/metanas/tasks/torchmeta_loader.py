@@ -9,6 +9,8 @@ from torchmeta.datasets.helpers import miniimagenet, triplemnist
 
 from metanas.tasks.core import TaskDistribution, Task
 
+import numpy as np
+from sklearn.model_selection import train_test_split
 
 """Task distribution using tochmeta
 Copyright (c) 2021 Robert Bosch GmbH
@@ -28,7 +30,7 @@ GNU Affero General Public License for more details.
 
 def sample_meta_batch(
     batch_iter, meta_batch_size, task_batch_size, shots, ways,
-    task_train_sampler=None
+    task_train_sampler=None, seed=None, validation_set=False
 ):
     """Sample a meta batch using a torchmeta :class:`BatchMetaDataLoader`
 
@@ -52,15 +54,50 @@ def sample_meta_batch(
 
     meta_train_batch = list()
     for task_idx in range(num_tasks):
-        dset_train = TensorDataset(
-            train_batch_x[task_idx], train_batch_y[task_idx])
-        dset_val = TensorDataset(
+
+        if validation_set:
+            train_idx, valid_idx = train_test_split(
+                np.arange(len(train_batch_y[task_idx].numpy())),
+                test_size=0.2, random_state=seed, shuffle=True,
+                stratify=train_batch_y[task_idx].numpy())
+
+            # Train loader
+            dset_train = TensorDataset(
+                train_batch_x[task_idx][train_idx],
+                train_batch_y[task_idx][train_idx])
+
+            train_loader = DataLoader(
+                dset_train, batch_size=task_batch_size
+            )
+
+            dset_test = TensorDataset(
+                train_batch_x[task_idx][valid_idx],
+                train_batch_y[task_idx][valid_idx])
+
+            print(train_batch_x[task_idx][train_idx].shape,
+                  train_batch_x[task_idx][valid_idx].shape,
+                  task_batch_size)
+
+            # TODO: Batch size correct?
+            val_loader = DataLoader(
+                dset_test, batch_size=5)
+            # print(next(iter(val_loader)))
+
+        else:
+            # Train loader
+            dset_train = TensorDataset(
+                train_batch_x[task_idx], train_batch_y[task_idx])
+            train_loader = DataLoader(
+                dset_train, batch_size=task_batch_size)
+
+            val_loader = train_loader
+
+        # Test loader
+        dset_test = TensorDataset(
             test_batch_x[task_idx], test_batch_y[task_idx])
-        train_loader = DataLoader(
-            dset_train, batch_size=task_batch_size, sampler=task_train_sampler
-        )
-        test_loader = DataLoader(dset_val, batch_size=shots * ways)
-        meta_train_batch.append(Task(train_loader, train_loader, test_loader))
+        test_loader = DataLoader(dset_test, batch_size=shots * ways)
+
+        meta_train_batch.append(Task(train_loader, val_loader, test_loader))
     return meta_train_batch
 
 
@@ -251,6 +288,9 @@ class TorchmetaTaskDistribution(TaskDistribution):
         self.data_path = config.data_path
         self.download = download
 
+        # Addition of possible test set
+        self.use_validation_set = config.use_validation_set
+
         self.k_way = config.k
         self.n_query = config.q  # number of query points (= test points)
         self.n_shot_test = config.n  # shots during meta-testing
@@ -270,6 +310,9 @@ class TorchmetaTaskDistribution(TaskDistribution):
         self.seed = config.seed
 
     def sample_meta_train(self):
+
+        # print("train", self.n_shot_train, self.k_way)
+
         return sample_meta_batch(
             self.train_it,
             self.meta_batch_size_train,
@@ -277,9 +320,13 @@ class TorchmetaTaskDistribution(TaskDistribution):
             self.n_shot_train,
             self.k_way,
             self.train_sampler,
-        )
+            seed=self.seed,
+            validation_set=self.use_validation_set)
 
     def sample_meta_valid(self):
+
+        # print("valid", self.n_shot_test, self.k_way)
+
         return sample_meta_batch(
             self.val_it,
             self.meta_batch_size_test,
@@ -287,9 +334,12 @@ class TorchmetaTaskDistribution(TaskDistribution):
             self.n_shot_test,
             self.k_way,
             self.val_sampler,
+            seed=self.seed,
+            validation_set=self.use_validation_set
         )
 
     def sample_meta_test(self):
+        # print("test", self.n_shot_test, self.k_way)
         return sample_meta_batch(
             self.test_it,
             self.meta_batch_size_test,
@@ -297,7 +347,11 @@ class TorchmetaTaskDistribution(TaskDistribution):
             self.n_shot_test,
             self.k_way,
             self.test_sampler,
+            seed=self.seed,
+            validation_set=self.use_validation_set
         )
+        # TODO: Disable validation for meta-testing as there
+        # are less query samples?
 
 
 class OmniglotFewShot(TorchmetaTaskDistribution):
@@ -579,14 +633,14 @@ class OmniPrintFewShot(TorchmetaTaskDistribution):
 
 
 class OmniPrintDomainAdaptationFewShot(TorchmetaTaskDistribution):
-    def __init__(self, config, download=False, source_domain_split=None,
-                 target_domain_split=None):
+    def __init__(self, config, download=False, source_domain=None,
+                 target_domain=None):
         super().__init__(config, 1, 32, download)
 
         self.train_loader = create_omniprint_data_loader(
             self.data_path,
             "train",
-            source_domain_split,
+            source_domain,
             self.k_way,
             self.n_shot_train,
             self.n_query,
@@ -600,7 +654,7 @@ class OmniPrintDomainAdaptationFewShot(TorchmetaTaskDistribution):
         self.val_loader = create_omniprint_data_loader(
             self.data_path,
             "val",
-            target_domain_split,
+            target_domain,
             self.k_way,
             self.n_shot_test,
             self.n_query,
@@ -614,7 +668,7 @@ class OmniPrintDomainAdaptationFewShot(TorchmetaTaskDistribution):
         self.test_loader = create_omniprint_data_loader(
             self.data_path,
             "test",
-            target_domain_split,
+            target_domain,
             self.k_way,
             self.n_shot_test,
             self.n_query,

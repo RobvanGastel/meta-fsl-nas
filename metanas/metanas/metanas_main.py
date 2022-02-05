@@ -222,6 +222,7 @@ def _init_meta_rl_agent(config, meta_model):
                             steps_per_worker=config.agent_steps_per_trial,
                             logger_kwargs=config.logger_kwargs,
                             is_nas_env=True)
+        # TODO: Add mask to Random agent
     elif config.agent == "ppo":
         agent = PPO(config, meta_model,
                     [env_normal],
@@ -1371,6 +1372,11 @@ if __name__ == "__main__":
         help="sparsify_input_alphas input for the search_cnn forward pass "
         "during final evaluation.",
     )  # deprecated
+
+    parser.add_argument(
+        "--use_validation_set", action="store_true",
+        help="Seperate a small part of the training set for validation"
+    )
 
     # Meta-RL agent settings
     parser.add_argument("--agent", default="random",

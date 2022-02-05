@@ -230,7 +230,7 @@ class PPO(RL_agent):
 
             curr_stat = []
             for w in range(self.n_workers):
-                curr_stat += stats[key]
+                curr_stat += stats[key][w]
             trial_stats[key] = np.mean(curr_stat)
 
         # Log test statistics
@@ -360,16 +360,22 @@ class PPO(RL_agent):
         self.hidden_states = torch.zeros(
             [1, self.n_workers, self.hidden_size]).to(self.device)
 
+        # print("sample train")
+
         # Reset environments
         for worker in self.workers:
             worker.child.send(("reset", None))
 
+        # print(self.n_workers, self.use_mask)
         for w, worker in enumerate(self.workers):
             if self.use_mask:
+                # print(self.use_mask)
+                # print("worker output", worker.child.recv())
                 self.obs[w], self.masks[w] = worker.child.recv()
             else:
                 self.obs[w] = worker.child.recv()
 
+        # print("start training")
         # Start sampling the training data
         for t in range(self.steps_per_worker):
 

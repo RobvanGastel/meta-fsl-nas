@@ -195,6 +195,7 @@ class NasEnv(gym.Env):
 
         # Invalid action mask
         mask = self.invalid_mask[self.current_state_index]
+        # print(mask, self.current_state)
         return self.current_state, mask
 
     def set_task(self, task, meta_state, test_phase=False):
@@ -491,6 +492,8 @@ class NasEnv(gym.Env):
         """
         start = time.time()
 
+        # print(self.step_count)
+
         # Mutates the meta_model and the local state
         action_info, reward, acc = self._perform_action(action)
 
@@ -700,6 +703,8 @@ class NasEnv(gym.Env):
             return reward, acc
 
         start = time.time()
+
+        # print("compute reward")
         if self.reward_estimation:
             acc = self._meta_predictor_estimation(self.current_task)
         else:
@@ -823,7 +828,8 @@ class NasEnv(gym.Env):
     def _darts_weight_alpha_estimation(self, task):
         self.meta_model.train()
 
-        # Set operation level dropout
+        # # Set operation level dropout
+        # TODO: Determine if should use
         if self.config.dropout_skip_connections and not \
                 self.test_phase:
 
@@ -841,45 +847,60 @@ class NasEnv(gym.Env):
 
         lr = self.config.w_lr
 
-        for step, ((train_X, train_y), (val_X, val_y)) in enumerate(
-            zip(task.train_loader, task.valid_loader)
-        ):
-            train_X, train_y = train_X.to(
-                self.config.device), train_y.to(self.config.device)
-            val_X, val_y = val_X.to(
-                self.config.device), val_y.to(self.config.device)
+        # print("loop")
 
-            # phase 2. architect step (alpha)
-            self.a_optim.zero_grad()
+        # for step, (val_X, val_y) in enumerate(task.valid_loader):
+        #     print("val", step, val_X.shape)
+        # for step, (train_X, train_y) in enumerate(task.train_loader):
+        #     print("train", step, train_X.shape)
 
-            self.architect.backward(
-                train_X, train_y, val_X, val_y, lr, self.w_optim)
-            self.a_optim.step()
+        try:
+            for step, ((train_X, train_y), (val_X, val_y)) in enumerate(
+                zip(task.train_loader, task.valid_loader)
+            ):
+                # print("train loop")
 
-            # phase 1. child network step (w)
-            self.w_optim.zero_grad()
-            logits = self.meta_model(
-                train_X, disable_pairwise_alphas=self.disable_pairwise_alphas)
+                train_X, train_y = train_X.to(
+                    self.config.device), train_y.to(self.config.device)
+                val_X, val_y = val_X.to(
+                    self.config.device), val_y.to(self.config.device)
 
-            loss = self.meta_model.criterion(logits, train_y)
-            loss.backward()
+                # phase 2. architect step (alpha)
+                self.a_optim.zero_grad()
 
-            nn.utils.clip_grad_norm_(
-                self.meta_model.weights(), self.config.w_grad_clip)
+                self.architect.backward(
+                    train_X, train_y, val_X, val_y, lr, self.w_optim)
+                self.a_optim.step()
 
-            self.w_optim.step()
+                # phase 1. child network step (w)
+                self.w_optim.zero_grad()
+                logits = self.meta_model(
+                    train_X, disable_pairwise_alphas=self.disable_pairwise_alphas)
 
-            # Obtain accuracy with gradient step
-            logits = self.meta_model(
-                train_X,  # sparsify_input_alphas=True,
-                disable_pairwise_alphas=self.disable_pairwise_alphas)
-            prec1, _ = utils.accuracy(logits, train_y, topk=(1, 5))
+                loss = self.meta_model.criterion(logits, train_y)
+                loss.backward()
+
+                nn.utils.clip_grad_norm_(
+                    self.meta_model.weights(), self.config.w_grad_clip)
+
+                self.w_optim.step()
+
+                # Obtain accuracy with gradient step
+                logits = self.meta_model(
+                    train_X,  # sparsify_input_alphas=True,
+                    disable_pairwise_alphas=self.disable_pairwise_alphas)
+                prec1, _ = utils.accuracy(logits, train_y, topk=(1, 5))
 
         # if (
         #     self.model_has_normalizer
         #     and self.task_train_steps < (self.arch_adap_steps - 1)
         # ):
         #     self.meta_model.normalizer["params"]["curr_step"] += 1
+
+        except Exception as e:
+            print(train_X.shape)
+            print(val_X.shape)
+            print(e)
 
         # Step increment
         self.task_train_steps += 1
