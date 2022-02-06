@@ -57,7 +57,7 @@ def set_hyperparameter(config):
         config.w_task_anneal = 0
 
     elif config.hp_setting == "og_metanas":  # setting for MetaNAS
-        config.task_train_steps = 6
+        config.task_train_steps = 5
         config.n_train = 15
         config.batch_size = 20
         config.batch_size_test = 10
@@ -131,8 +131,6 @@ def set_rl_hyperparameters(config):
     config.logger_kwargs = setup_logger_kwargs(config.path,
                                                seed=config.seed)
 
-    config.env_max_ep_len = 200
-
     # Reward range
     config.max_rew = config.env_max_rew
     config.min_rew = config.env_min_rew
@@ -142,14 +140,15 @@ def set_rl_hyperparameters(config):
     config.darts_estimation_steps = config.darts_estimation_steps+1
     # Environment exploration
     config.encourage_exploration = config.env_encourage_exploration
-    config.encourage_increase = 2.0
+    config.encourage_increase = 1.0
     config.encourage_decrease = 0.0
 
     config.env_alpha_probability = 0.1
+    config.env_max_ep_len = 200
 
     # Agent configuration
     config.agent_epochs_per_trial = 3
-    config.agent_steps_per_epoch = 100
+    config.agent_steps_per_epoch = 400
 
     if config.agent == "ppo":
         config.gamma = 0.99

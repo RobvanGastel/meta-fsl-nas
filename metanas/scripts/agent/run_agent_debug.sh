@@ -9,8 +9,8 @@ WARM_UP=0
 SEEDS=(2)
 
 DATASET=omniglot
-N=1
-K=20
+N=5
+K=5
 DATASET_DIR=/home/rob/Git/meta-fsl-nas/data
 EVAL_FREQ=1
 
@@ -67,9 +67,9 @@ do
         --drop_path_prob 0.2 \
 
         # Architectures
-        --init_channels 28 \
-        --layers 4 \
-        --nodes 3 \
+        --init_channels 14 \
+        --layers 3 \
+        --nodes 2 \
         --reduction_layers 1 3 \
         --use_first_order_darts \
         --use_torchmeta_loader \
@@ -82,16 +82,17 @@ do
 
         # Environment
         --use_meta_model \
-        --darts_estimation_steps 8 \
+        --darts_estimation_steps 7 \
         --env_update_weights_and_alphas \
         --env_disable_pairwise_alphas \
 
         # --use_tse_darts \
+        --use_validation_set \
 
         --use_env_random_start \
 
         --env_encourage_exploration \
-        --env_min_rew -0.10 \
+        --env_min_rew 0.00 \
         --env_max_rew 1.00 \
 
         # meta-RL optimization

@@ -4,7 +4,7 @@ source /home/TUE/20184291/miniconda3/etc/profile.d/conda.sh
 source activate metanas
 
 # parameters
-EPOCHS=100
+EPOCHS=40
 WARM_UP=0
 SEEDS=(2)
 
@@ -12,7 +12,7 @@ DATASET=omniglot
 N=1
 K=20
 DATASET_DIR=/home/TUE/20184291/meta-fsl-nas/data
-EVAL_FREQ=25
+EVAL_FREQ=10
 
 AGENT=ppo
 
@@ -20,7 +20,7 @@ echo "Start run ${AGENT}, variables: epochs = ${EPOCHS}, warm up variables = ${W
 
 for SEED in ${SEEDS}
 do
-    TRAIN_DIR=/home/TUE/20184291/meta-fsl-nas/metanas/results/${DATASET}_n${N}_k${K}/${AGENT}_tse_darts_env_disc_super/seed_$SEED
+    TRAIN_DIR=/home/TUE/20184291/meta-fsl-nas/metanas/results/${DATASET}_n${N}_k${K}/${AGENT}_darts_env_disc_super/seed_$SEED
 	mkdir -p $TRAIN_DIR
 
     args=(
@@ -84,6 +84,9 @@ do
 		--darts_estimation_steps 8 \
         --env_update_weights_and_alphas \
         --env_disable_pairwise_alphas \
+
+        # TSE-DARTS
+        # --use_tse_darts \
 
         # Environment
         --use_env_random_start \
