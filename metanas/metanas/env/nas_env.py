@@ -64,7 +64,7 @@ class NasEnv(gym.Env):
             self.feature_extractor = torch.nn.Sequential(
                 *list(model.children())[:-1])
         else:
-            # DARTS estimation of the network is used
+            # DARTS estimation of the network
             self.task_train_steps = 0
 
             self.w_optim = torch.optim.Adam(
@@ -195,7 +195,6 @@ class NasEnv(gym.Env):
 
         # Invalid action mask
         mask = self.invalid_mask[self.current_state_index]
-        # print(mask, self.current_state)
         return self.current_state, mask
 
     def set_task(self, task, meta_state, test_phase=False):
@@ -243,31 +242,19 @@ class NasEnv(gym.Env):
         self.edge_to_index = {}
         self.edge_to_alpha = {}
 
-        # Define (normalized) alphas
+        # Set (normalized) alphas
         if self.cell_type == "normal":
-            # TODO: Use _get_normalized_alphas?
-            # Idea of letting RL observe the normalized alphas,
-            # and mutate the actual alpha values
-            # self.normalized_alphas = [
-            #     F.softmax(alpha, dim=-1).detach().cpu()
-            #     for alpha in self.meta_model.alpha_normal]
-
+            # Normalize with normalizer dict
             self.normalized_alphas = self.meta_model.normalized_normal_alphas()
 
             self.alphas = [
-                alpha.detach().cpu()
-                for alpha in self.meta_model.alpha_normal]
+                alpha.detach().cpu() for alpha in self.meta_model.alpha_normal]
 
         elif self.cell_type == "reduce":
-            # self.normalized_alphas = [
-            #     F.softmax(alpha, dim=-1).detach().cpu()
-            #     for alpha in self.meta_model.alpha_reduce]
-
             self.normalized_alphas = self.meta_model.normalized_reduce_alphas()
 
             self.alphas = [
-                alpha.detach().cpu()
-                for alpha in self.meta_model.alpha_reduce]
+                alpha.detach().cpu() for alpha in self.meta_model.alpha_reduce]
 
         else:
             raise RuntimeError(f"Cell type {self.cell_type} is not supported.")
@@ -292,6 +279,7 @@ class NasEnv(gym.Env):
                 self.edge_to_alpha[(i+2, j)] = (i, j)
 
                 # Store to check if edge has changed
+                # TODO
                 self.discrete_alphas.append(edge.detach().numpy())
                 self.discrete_alphas.append(edge.detach().numpy())
 
@@ -492,8 +480,6 @@ class NasEnv(gym.Env):
         """
         start = time.time()
 
-        # print(self.step_count)
-
         # Mutates the meta_model and the local state
         action_info, reward, acc = self._perform_action(action)
 
@@ -645,6 +631,7 @@ class NasEnv(gym.Env):
                 # Only "Calculate reward/do_update" for reward if
                 # in top-k
                 self.do_update = update
+                # TODO
                 # edge_become_topk(
                 #   prev_states, self.states, self.discrete_alphas, s_idx)
 
@@ -680,6 +667,7 @@ class NasEnv(gym.Env):
                 # Only "Calculate reward/do_update" for reward if
                 # in top-k or if the topk edge changed.
                 self.do_update = update
+                # TODO
                 # edge_become_topk(
                 #   prev_states, self.states, self.discrete_alphas, s_idx)
 
@@ -702,9 +690,6 @@ class NasEnv(gym.Env):
             reward = self.scale_reward(acc)
             return reward, acc
 
-        start = time.time()
-
-        # print("compute reward")
         if self.reward_estimation:
             acc = self._meta_predictor_estimation(self.current_task)
         else:
@@ -718,13 +703,10 @@ class NasEnv(gym.Env):
                 acc = self._darts_weight_estimation(self.current_task)
 
         # Scale reward to (min_rew, max_rew) range, [-min, max]
-        # reward = self.scale_reward(acc)
         reward = self.scale_postive_reward(acc)
 
         if self.max_acc < acc:
             self.max_acc = acc
-            # TODO: Option for bonus on max reward
-            # reward += 0.5
 
         return reward, acc
 
@@ -780,13 +762,7 @@ class NasEnv(gym.Env):
         return reward
 
     def _init_darts_training(self):
-        if self.test_phase:
-            self.train_steps = self.config.test_task_train_steps
-            self.arch_adap_steps = int(
-                self.train_steps * self.config.test_adapt_steps)
-        else:
-            self.train_steps = self.config.darts_estimation_steps
-            self.arch_adap_steps = self.train_steps
+        self.train_steps = self.config.darts_estimation_steps
         self.task_train_steps = 0
 
         if self.config.w_task_anneal:
@@ -795,8 +771,7 @@ class NasEnv(gym.Env):
                 group["lr"] = self.config.w_lr
 
             self.w_task_lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-                self.w_optim, self.train_steps, eta_min=0.0
-            )
+                self.w_optim, self.train_steps, eta_min=0.0)
         else:
             self.w_task_lr_scheduler = None
 
@@ -805,8 +780,7 @@ class NasEnv(gym.Env):
                 group["lr"] = self.config.alpha_lr
 
             self.a_task_lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-                self.a_optim, self.arch_adap_steps, eta_min=0.0
-            )
+                self.a_optim, self.train_steps, eta_min=0.0)
         else:
             self.a_task_lr_scheduler = None
 
@@ -814,7 +788,10 @@ class NasEnv(gym.Env):
         if self.model_has_normalizer:
             self.meta_model.normalizer["params"]["curr_step"] = 0.0
             self.meta_model.normalizer["params"]["max_steps"] = float(
-                self.arch_adap_steps)
+                self.train_steps)
+
+        self.dropout_stage = self.config.dropout_op
+        self.scale_factor = self.config.dropout_scale_factor
 
         if self.config.drop_path_prob > 0.0:
             # do drop path if not test phase (=in train phase) or if also use
@@ -822,18 +799,12 @@ class NasEnv(gym.Env):
             if not self.test_phase or self.config.use_drop_path_in_meta_testing:
                 self.meta_model.drop_path_prob(self.config.drop_path_prob)
 
-        self.dropout_stage = self.config.dropout_op
-        self.scale_factor = self.config.dropout_scale_factor
-
     def _darts_weight_alpha_estimation(self, task):
         self.meta_model.train()
 
-        # # Set operation level dropout
-        # TODO: Determine if should use
+        # Exponential decay in dropout rate
         if self.config.dropout_skip_connections and not \
                 self.test_phase:
-
-            # Exponential decay in dropout rate
             dropout_rate = self.dropout_stage * \
                 np.exp(-self.task_train_steps * self.scale_factor)
             self.meta_model.drop_out_skip_connections(dropout_rate)
@@ -845,77 +816,54 @@ class NasEnv(gym.Env):
         if self.a_task_lr_scheduler is not None:
             self.a_task_lr_scheduler.step()
 
-        lr = self.config.w_lr
+        for step, ((train_X, train_y), (val_X, val_y)) in enumerate(
+            zip(task.train_loader, task.valid_loader)
+        ):
+            train_X, train_y = train_X.to(
+                self.config.device), train_y.to(self.config.device)
+            val_X, val_y = val_X.to(
+                self.config.device), val_y.to(self.config.device)
 
-        # print("loop")
+            # phase 2. architect step (alpha)
+            self.a_optim.zero_grad()
 
-        # for step, (val_X, val_y) in enumerate(task.valid_loader):
-        #     print("val", step, val_X.shape)
-        # for step, (train_X, train_y) in enumerate(task.train_loader):
-        #     print("train", step, train_X.shape)
+            self.architect.backward(
+                train_X, train_y, val_X, val_y, self.config.w_lr, self.w_optim)
+            self.a_optim.step()
 
-        try:
-            for step, ((train_X, train_y), (val_X, val_y)) in enumerate(
-                zip(task.train_loader, task.valid_loader)
-            ):
-                # print("train loop")
+            # phase 1. child network step (w)
+            self.w_optim.zero_grad()
+            logits = self.meta_model(
+                train_X, disable_pairwise_alphas=self.disable_pairwise_alphas)
 
-                train_X, train_y = train_X.to(
-                    self.config.device), train_y.to(self.config.device)
-                val_X, val_y = val_X.to(
-                    self.config.device), val_y.to(self.config.device)
+            loss = self.meta_model.criterion(logits, train_y)
+            loss.backward()
 
-                # phase 2. architect step (alpha)
-                self.a_optim.zero_grad()
+            nn.utils.clip_grad_norm_(
+                self.meta_model.weights(), self.config.w_grad_clip)
 
-                self.architect.backward(
-                    train_X, train_y, val_X, val_y, lr, self.w_optim)
-                self.a_optim.step()
+            self.w_optim.step()
 
-                # phase 1. child network step (w)
-                self.w_optim.zero_grad()
-                logits = self.meta_model(
-                    train_X, disable_pairwise_alphas=self.disable_pairwise_alphas)
-
-                loss = self.meta_model.criterion(logits, train_y)
-                loss.backward()
-
-                nn.utils.clip_grad_norm_(
-                    self.meta_model.weights(), self.config.w_grad_clip)
-
-                self.w_optim.step()
-
-                # Obtain accuracy with gradient step
-                logits = self.meta_model(
-                    train_X,  # sparsify_input_alphas=True,
-                    disable_pairwise_alphas=self.disable_pairwise_alphas)
-                prec1, _ = utils.accuracy(logits, train_y, topk=(1, 5))
-
-        # if (
-        #     self.model_has_normalizer
-        #     and self.task_train_steps < (self.arch_adap_steps - 1)
-        # ):
-        #     self.meta_model.normalizer["params"]["curr_step"] += 1
-
-        except Exception as e:
-            print(train_X.shape)
-            print(val_X.shape)
-            print(e)
-
-        # Step increment
         self.task_train_steps += 1
 
-        acc = prec1.item()
-        return acc
+        # Obtain accuracy with gradient step
+        accs = []
+        for step, (val_X, val_y) in enumerate(task.valid_loader):
+            # TODO
+            logits = self.meta_model(
+                val_X,  # sparsify_input_alphas=True,
+                disable_pairwise_alphas=self.disable_pairwise_alphas)
+            prec1, _ = utils.accuracy(logits, val_y, topk=(1, 5))
+            accs.append(prec1.item())
+
+        return np.mean(accs)
 
     def _tse_darts_weight_alpha_estimation(self, task):
         self.meta_model.train()
 
-        # Set operation level dropout
+        # Exponential decay in dropout rate
         if self.config.dropout_skip_connections and not \
                 self.test_phase:
-
-            # Exponential decay in dropout rate
             dropout_rate = self.dropout_stage * \
                 np.exp(-self.task_train_steps * self.scale_factor)
             self.meta_model.drop_out_skip_connections(dropout_rate)
@@ -969,23 +917,20 @@ class NasEnv(gym.Env):
             self.w_optim.zero_grad()
             self.a_optim.zero_grad()
 
-        # Obtain accuracy with gradient step
-        logits = self.meta_model(
-            train_X,
-            disable_pairwise_alphas=self.disable_pairwise_alphas)
-        prec1, _ = utils.accuracy(logits, train_y, topk=(1, 5))
-
-        # if (
-        #     self.model_has_normalizer
-        #     and self.task_train_steps < (self.arch_adap_steps - 1)
-        # ):
-        #     self.meta_model.normalizer["params"]["curr_step"] += 1
-
         # Step increment
         self.task_train_steps += 1
 
-        acc = prec1.item()
-        return acc
+        # Obtain accuracy with gradient step
+        accs = []
+        for step, (val_X, val_y) in enumerate(task.valid_loader):
+            # TODO
+            logits = self.meta_model(
+                val_X,  # sparsify_input_alphas=True,
+                disable_pairwise_alphas=self.disable_pairwise_alphas)
+            prec1, _ = utils.accuracy(logits, val_y, topk=(1, 5))
+            accs.append(prec1.item())
+
+        return np.mean(accs)
 
     def _darts_weight_estimation(self, task):
         """Train network with one step gradient descent on the training set
@@ -1000,11 +945,9 @@ class NasEnv(gym.Env):
 
         self.meta_model.train()
 
-        # Set operation level dropout
+        # Exponential decay in dropout rate
         if self.config.dropout_skip_connections and not \
                 self.test_phase:
-
-            # Exponential decay in dropout rate
             dropout_rate = self.dropout_stage * \
                 np.exp(-self.task_train_steps * self.scale_factor)
             self.meta_model.drop_out_skip_connections(dropout_rate)
@@ -1031,23 +974,18 @@ class NasEnv(gym.Env):
                 self.meta_model.weights(), self.config.w_grad_clip)
             self.w_optim.step()
 
-            # Obtain accuracy with gradient step
-            logits = self.meta_model(
-                train_X,
-                disable_pairwise_alphas=self.disable_pairwise_alphas)
-            prec1, _ = utils.accuracy(logits, train_y, topk=(1, 5))
-
-        # if (
-        #     self.model_has_normalizer
-        #     and self.task_train_steps < (self.arch_adap_steps - 1)
-        # ):
-            # self.meta_model.normalizer["params"]["curr_step"] += 1
-
-            # Step increment
         self.task_train_steps += 1
 
-        acc = prec1.item()
-        return acc
+        # Obtain accuracy with gradient step
+        accs = []
+        for step, (val_X, val_y) in enumerate(task.valid_loader):
+            # TODO
+            logits = self.meta_model(
+                val_X,  # sparsify_input_alphas=True,
+                disable_pairwise_alphas=self.disable_pairwise_alphas)
+            prec1, _ = utils.accuracy(logits, val_y, topk=(1, 5))
+            accs.append(prec1.item())
+        return np.mean(accs)
 
     def _meta_predictor_estimation(self, task):
         # Encode graph and dataset
@@ -1160,8 +1098,6 @@ class NasEnv(gym.Env):
         # Extracts features by ResNet18
         return self.feature_extractor(dataset)
 
-# MetaD2A helper functions
-
 
 def fill_up_dataset(dataset, required_size):
     ds_size = dataset.shape[0]
@@ -1215,8 +1151,6 @@ def parse(alpha, k, primitives=gt.PRIMITIVES_NAS_BENCH_201):
         gene.append(node_gene)
     return gene
 
-# Graph traversal helper functions
-
 
 def edge_become_topk(prev_dict, states, alphas, s_idx):
     prev_topk = prev_dict['prev_states'][:, 2]
@@ -1228,7 +1162,7 @@ def edge_become_topk(prev_dict, states, alphas, s_idx):
         if (prev_topk[s_idx] < topk[s_idx]):
             return True
 
-        # TODO: Is this necessary?
+        # Is this necessary?
         return (prev_alphas[s_idx] < alphas[s_idx]).any()
 
     return False

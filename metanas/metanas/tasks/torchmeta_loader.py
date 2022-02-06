@@ -70,19 +70,13 @@ def sample_meta_batch(
                 dset_train, batch_size=task_batch_size
             )
 
-            dset_test = TensorDataset(
+            # Validation loader
+            dset_val = TensorDataset(
                 train_batch_x[task_idx][valid_idx],
                 train_batch_y[task_idx][valid_idx])
 
-            print(train_batch_x[task_idx][train_idx].shape,
-                  train_batch_x[task_idx][valid_idx].shape,
-                  task_batch_size)
-
-            # TODO: Batch size correct?
             val_loader = DataLoader(
-                dset_test, batch_size=5)
-            # print(next(iter(val_loader)))
-
+                dset_val, batch_size=5)
         else:
             # Train loader
             dset_train = TensorDataset(
@@ -310,9 +304,6 @@ class TorchmetaTaskDistribution(TaskDistribution):
         self.seed = config.seed
 
     def sample_meta_train(self):
-
-        # print("train", self.n_shot_train, self.k_way)
-
         return sample_meta_batch(
             self.train_it,
             self.meta_batch_size_train,
@@ -324,9 +315,6 @@ class TorchmetaTaskDistribution(TaskDistribution):
             validation_set=self.use_validation_set)
 
     def sample_meta_valid(self):
-
-        # print("valid", self.n_shot_test, self.k_way)
-
         return sample_meta_batch(
             self.val_it,
             self.meta_batch_size_test,
@@ -339,7 +327,6 @@ class TorchmetaTaskDistribution(TaskDistribution):
         )
 
     def sample_meta_test(self):
-        # print("test", self.n_shot_test, self.k_way)
         return sample_meta_batch(
             self.test_it,
             self.meta_batch_size_test,
@@ -350,8 +337,6 @@ class TorchmetaTaskDistribution(TaskDistribution):
             seed=self.seed,
             validation_set=self.use_validation_set
         )
-        # TODO: Disable validation for meta-testing as there
-        # are less query samples?
 
 
 class OmniglotFewShot(TorchmetaTaskDistribution):

@@ -122,7 +122,7 @@ class PPO(RL_agent):
 
         self.workers = [Worker(env) for env in envs]
 
-    def run_test_trial(self):
+    def run_test_trial(self, single_episode=False):
         """Run single meta-reinforcement learning testing trial for a given
         number of worker steps.
         """
@@ -130,7 +130,6 @@ class PPO(RL_agent):
         # Track statistics
         ep_stats = {'ep_len': np.zeros(self.n_workers),
                     'ep_rew': np.zeros(self.n_workers)}
-        # 'eps': np.zeros(self.n_workers)
 
         # Compute final statistics
         stats = {'MetaTestEpLen': {i: [] for i in range(self.n_workers)},
@@ -209,6 +208,10 @@ class PPO(RL_agent):
                     # Reset statistics
                     ep_stats['ep_len'][w] = 0
                     ep_stats['ep_rew'][w] = 0
+
+                    # TODO: Only works for workers=1
+                    if single_episode:
+                        break
 
                 # Store latest observations
                 self.obs[w] = obs
@@ -360,22 +363,16 @@ class PPO(RL_agent):
         self.hidden_states = torch.zeros(
             [1, self.n_workers, self.hidden_size]).to(self.device)
 
-        # print("sample train")
-
         # Reset environments
         for worker in self.workers:
             worker.child.send(("reset", None))
 
-        # print(self.n_workers, self.use_mask)
         for w, worker in enumerate(self.workers):
             if self.use_mask:
-                # print(self.use_mask)
-                # print("worker output", worker.child.recv())
                 self.obs[w], self.masks[w] = worker.child.recv()
             else:
                 self.obs[w] = worker.child.recv()
 
-        # print("start training")
         # Start sampling the training data
         for t in range(self.steps_per_worker):
 
@@ -395,8 +392,6 @@ class PPO(RL_agent):
 
             # Send actions to the environments
             for w, worker in enumerate(self.workers):
-                # worker.child.send(
-                #     ("step", self.buffer.actions[w, t].cpu().numpy()))
                 worker.child.send(("step", actions[w].cpu().item()))
 
             # Retrieve step results from the environments

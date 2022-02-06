@@ -139,7 +139,7 @@ def set_rl_hyperparameters(config):
 
     # Configure DARTS estimation
     config.update_weights_and_alphas = config.env_update_weights_and_alphas
-
+    config.darts_estimation_steps = config.darts_estimation_steps+1
     # Environment exploration
     config.encourage_exploration = config.env_encourage_exploration
     config.encourage_increase = 2.0

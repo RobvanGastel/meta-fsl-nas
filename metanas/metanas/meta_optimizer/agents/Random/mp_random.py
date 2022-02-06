@@ -1,5 +1,6 @@
 import time
 import numpy as np
+import copy
 
 from metanas.meta_optimizer.agents.agent import RL_agent
 from metanas.meta_optimizer.agents.utils.mp_utils import Worker
@@ -10,18 +11,25 @@ class RandomPolicy:
         self._action_space = action_space
         self.n_workers = n_workers
 
-    def act(self):
-        return np.random.randint(
-            self._action_space.n, size=self.n_workers)
+    def act(self, mask=None):
+        if mask is None:
+            return np.random.randint(
+                self._action_space.n, size=self.n_workers)
+
+        # Masked random actions
+        rand = np.random.random_sample(
+            (self.n_workers, self._action_space.n)) * mask
+        return np.argmax(rand, axis=1)
 
 
 class RandomAgent(RL_agent):
-    def __init__(self, config, envs, logger_kwargs=dict(), seed=42,
-                 steps_per_worker=2500, is_nas_env=False):
+    def __init__(self, config, meta_model, envs, logger_kwargs=dict(), seed=42,
+                 steps_per_worker=2500, is_nas_env=False, use_mask=False):
         super().__init__(config, envs[0], logger_kwargs,
                          seed, 0, 0)
 
         self.is_nas_env = is_nas_env
+        self.use_mask = use_mask
 
         # Initialize environment workers
         self.n_workers = len(envs)
@@ -34,6 +42,14 @@ class RandomAgent(RL_agent):
 
         self.total_trials = 0
 
+        self.max_acc = 0.0
+        self.meta_model = meta_model
+        self.max_meta_model = copy.deepcopy(meta_model)
+
+        act_dim = envs[0].action_space.n
+        if use_mask:
+            self.masks = np.ones((self.n_workers, act_dim), dtype=np.float32)
+
         self.policy = RandomPolicy(envs[0].action_space, self.n_workers)
 
     def set_task(self, envs):
@@ -42,21 +58,33 @@ class RandomAgent(RL_agent):
 
         self.workers = [Worker(env) for env in envs]
 
-    def run_test_trial(self):
+    def run_test_trial(self, single_episode=False):
 
         # Track statistics
-        start_time = time.time()
-        ep_stats = {'ep_len': np.zeros(2), 'ep_rew': np.zeros(2)}
+        ep_stats = {'ep_len': np.zeros(self.n_workers),
+                    'ep_rew': np.zeros(self.n_workers)}
+
+        # Compute final statistics
+        stats = {'MetaTestEpLen': {i: [] for i in range(self.n_workers)},
+                 'MetaTestEpRet': {i: [] for i in range(self.n_workers)},
+                 'MetaTestAcc': {i: [] for i in range(self.n_workers)},
+                 'MetaTestMaxAcc': {i: [] for i in range(self.n_workers)}}
 
         # Reset environments
         for worker in self.workers:
             worker.child.send(("reset", None))
 
-        for worker in self.workers:
-            worker.child.recv()
+        for w, worker in enumerate(self.workers):
+            if self.use_mask:
+                _, self.masks[w] = worker.child.recv()
+            else:
+                worker.child.recv()
 
         for _ in range(self.steps_per_worker):
-            actions = self.policy.act()
+            if self.use_mask:
+                actions = self.policy.act(self.masks)
+            else:
+                actions = self.policy.act()
 
             # Send actions to the environments
             for w, worker in enumerate(self.workers):
@@ -66,6 +94,9 @@ class RandomAgent(RL_agent):
             for w, worker in enumerate(self.workers):
                 _, rew, done, info = worker.child.recv()
 
+                if self.use_mask:
+                    mask = info['mask']
+
                 # Track episode statistics
                 ep_stats['ep_len'][w] += 1
                 ep_stats['ep_rew'][w] += rew
@@ -74,20 +105,37 @@ class RandomAgent(RL_agent):
                 if self.is_nas_env:
                     acc = info['acc']
                     if acc is not None:
-                        self.logger.store(MetaTestAcc=info['acc'])
+                        stats['MetaTestAcc'][w].append(acc)
+
+                        if acc > self.max_acc:
+                            self.max_acc = acc
+                            stats['MetaTestMaxAcc'][w].append(acc)
+
+                            self.max_meta_model = copy.deepcopy(
+                                self.meta_model.state_dict())
 
                 if done:
-                    # Store the information of the completed episode
+                    # Calclate the information of the completed episode
                     # (e.g. total reward, episode length)
-                    self.logger.store(MetaTestEpRet=ep_stats['ep_rew'][w],
-                                      MetaTestEpLen=ep_stats['ep_len'][w])
+                    stats['MetaTestEpLen'][w].append(ep_stats['ep_len'][w])
+                    stats['MetaTestEpRet'][w].append(ep_stats['ep_rew'][w])
 
                     worker.child.send(("reset", None))
-                    worker.child.recv()
+                    if self.use_mask:
+                        _, mask = worker.child.recv()
+                    else:
+                        _ = worker.child.recv()
 
                     # Reset statistics
                     ep_stats['ep_len'][w] = 0
                     ep_stats['ep_rew'][w] = 0
+
+                    # TODO: Only works for workers=1
+                    if single_episode:
+                        break
+
+                if self.use_mask:
+                    self.masks[w] = mask
 
             self.total_test_steps += self.n_workers
 
@@ -98,29 +146,40 @@ class RandomAgent(RL_agent):
         except:
             pass
 
-        if self.is_nas_env:
-            # Calculate final test reward, at the end of the episode
-            task_info = self.env.darts_evaluate_test_set()
-            self.logger.store(MetaTestTestAcc=task_info.top1)
+        # Aggregate test statistics
+        trial_stats = {}
+        for key in stats.keys():
 
-        self.log_test_trial()
+            curr_stat = []
+            for w in range(self.n_workers):
+                curr_stat += stats[key][w]
+            trial_stats[key] = np.mean(curr_stat)
+
+        # Log test statistics
+        self.log_test_trial(trial_stats)
+
+        return self.max_meta_model
 
     def run_trial(self):
-
         # Track statistics
-        start_time = time.time()
-        ep_stats = {'ep_len': np.zeros(2), 'ep_rew': np.zeros(2)}
+        ep_stats = {'ep_len': np.zeros(self.n_workers),
+                    'ep_rew': np.zeros(self.n_workers)}
 
         # Reset environments
         for worker in self.workers:
             worker.child.send(("reset", None))
 
-        # Set observations
         for w, worker in enumerate(self.workers):
-            worker.child.recv()
+            if self.use_mask:
+                _, self.masks[w] = worker.child.recv()
+            else:
+                worker.child.recv()
 
         for t in range(self.steps_per_worker):
-            actions = self.policy.act()
+            if self.use_mask:
+                actions = self.policy.act(self.masks)
+            else:
+                actions = self.policy.act()
 
             # Send actions to the environments
             for w, worker in enumerate(self.workers):
@@ -145,11 +204,17 @@ class RandomAgent(RL_agent):
                                       EpLen=ep_stats['ep_len'][w])
 
                     worker.child.send(("reset", None))
-                    worker.child.recv()
+                    if self.use_mask:
+                        _, mask = worker.child.recv()
+                    else:
+                        worker.child.recv()
 
                     # Reset statistics
                     ep_stats['ep_len'][w] = 0
                     ep_stats['ep_rew'][w] = 0
+
+                if self.use_mask:
+                    self.masks[w] = mask
 
             self.total_steps += self.n_workers
 
@@ -159,17 +224,6 @@ class RandomAgent(RL_agent):
                 worker.child.send(("close", None))
         except:
             pass
-
-        if self.is_nas_env:
-            # Calculate final test reward, at the end of the episode
-            task_info = self.env.darts_evaluate_test_set()
-            self.logger.store(TestAcc=task_info.top1)
-
-        self.total_trials += 1
-        self.log_trial(start_time, self.total_trials)
-
-        if self.is_nas_env:
-            return task_info
 
     def log_trial(self, start_time, trial):
         log_board = {'Performance': ['EpRet', 'EpLen', 'Time']}
@@ -221,23 +275,25 @@ class RandomAgent(RL_agent):
         self.logger.log_tabular('Time', time.time()-start_time)
         self.logger.dump_tabular()
 
-    def log_test_trial(self):
-        # Log info about the current trial
+    def log_test_trial(self, stats):
+        """Log meta-test trial to tensorboard
+        """
+
         log_board = {
-            'Performance': ['MetaTestEpRet', 'MetaTestEpLen']}
+            'Testing': ['MetaTestEpRet', 'MetaTestEpLen',
+                        'MetaTestAcc', 'MetaTestMaxAcc']}
 
-        # Ignore this metric for non-NAS environments
-        if self.is_nas_env:
-            log_board['Environment'] = ['MetaTestAcc', 'MetaTestTestAcc']
+        for key in log_board['Testing']:
+            self.summary_writer.add_scalar(
+                'Testing/Average'+key, stats[key], self.total_test_steps)
 
-        for key, value in log_board.items():
-            for val in value:
-                mean, std = self.logger.get_stats(val)
-                if key == 'Performance' or key == "Environment":
-                    self.summary_writer.add_scalar(
-                        key+'/Average'+val, mean, self.total_test_steps)
-                    self.summary_writer.add_scalar(
-                        key+'/Std'+val, std, self.total_test_steps)
+    def log_test_test_accuracy(self, task_info):
+        self.summary_writer.add_scalar(
+            'Testing/MetaTestTestFinetuneAcc',
+            task_info.top1, self.total_test_steps)
+        self.summary_writer.add_scalar(
+            'Testing/MetaTestTestFinetuneLoss',
+            task_info.loss, self.total_test_steps)
 
     def _log_nas_info_dict(self, info_dict):
         """Log NAS environment information
@@ -249,6 +305,13 @@ class RandomAgent(RL_agent):
         acc = info_dict['acc']
         if acc is not None:
             self.logger.store(Acc=info_dict['acc'])
+
+            if acc > self.max_acc:
+                self.max_acc = acc
+                self.max_meta_model = copy.deepcopy(
+                    self.meta_model.state_dict())
+
+                self.logger.store(MaxTrialAcc=acc)
 
         self.logger.store(
             NumIllegalEdgeTrav=info_dict['illegal_edge_traversals'])
