@@ -851,6 +851,8 @@ class NasEnv(gym.Env):
         # Obtain accuracy with gradient step
         accs = []
         for step, (val_X, val_y) in enumerate(task.valid_loader):
+            val_X, val_y = val_X.to(
+                self.config.device), val_y.to(self.config.device)
             # TODO
             logits = self.meta_model(
                 val_X,  # sparsify_input_alphas=True,
@@ -925,6 +927,8 @@ class NasEnv(gym.Env):
         # Obtain accuracy with gradient step
         accs = []
         for step, (val_X, val_y) in enumerate(task.valid_loader):
+            val_X, val_y = val_X.to(
+                self.config.device), val_y.to(self.config.device)
             # TODO
             logits = self.meta_model(
                 val_X,  # sparsify_input_alphas=True,
@@ -981,6 +985,8 @@ class NasEnv(gym.Env):
         # Obtain accuracy with gradient step
         accs = []
         for step, (val_X, val_y) in enumerate(task.valid_loader):
+            val_X, val_y = val_X.to(
+                self.config.device), val_y.to(self.config.device)
             # TODO
             logits = self.meta_model(
                 val_X,  # sparsify_input_alphas=True,
