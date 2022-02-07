@@ -219,7 +219,7 @@ def _init_meta_rl_agent(config, meta_model):
         agent = RandomAgent(config, meta_model,
                             [env_normal],
                             seed=config.seed,
-                            steps_per_worker=config.agent_steps_per_trial,
+                            steps_per_worker=config.agent_steps_per_epoch,
                             logger_kwargs=config.logger_kwargs,
                             is_nas_env=True)
         # TODO: Add mask to Random agent
@@ -374,8 +374,9 @@ def meta_rl_optimization(
         meta_state, meta_model, meta_epoch, test_phase=False):
 
     if not config.use_meta_model:
-        # Only update the alphas, not weights
-        # Normal cell environment
+        # Only update the alphas
+
+        # NORMAL cell environment
         env_normal.set_task(task, meta_state, test_phase)
         agent.set_task([env_normal])
         max_meta_state = agent.run_trial()
@@ -386,11 +387,14 @@ def meta_rl_optimization(
 
         # Load max normal alphas in initial meta state
         meta_model.load_state_dict(meta_state)
+
+        # Set NORMAL alphas
         for p1, p2 in zip(meta_model.alpha_normal, alpha_normal):
             p1.data = p2.data
         meta_state = meta_model.state_dict()
 
-        # Reduce cell environment
+        #####
+        # REDUCE cell environment
         env_reduce.set_task(task, meta_state, test_phase)
         agent.set_task([env_reduce])
         max_meta_state = agent.run_trial()
@@ -401,6 +405,8 @@ def meta_rl_optimization(
 
         # Load max reduce alphas in initial meta state
         meta_model.load_state_dict(meta_state)
+
+        # Set NORMAL alphas
         for p1, p2 in zip(meta_model.alpha_reduce, alpha_reduce):
             p1.data = p2.data
     else:

@@ -35,6 +35,8 @@ class RandomAgent(RL_agent):
         self.n_workers = len(envs)
         self.workers = [Worker(env) for env in envs]
 
+        self.agent_epochs_per_trial = config.agent_epochs_per_trial
+
         # Steps variables
         self.total_steps = 0
         self.total_test_steps = 0
@@ -175,7 +177,8 @@ class RandomAgent(RL_agent):
             else:
                 worker.child.recv()
 
-        for t in range(self.steps_per_worker):
+        for t in range(
+                self.steps_per_worker * self.agent_epochs_per_trial):
             if self.use_mask:
                 actions = self.policy.act(self.masks)
             else:

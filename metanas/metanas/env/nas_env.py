@@ -843,7 +843,6 @@ class NasEnv(gym.Env):
 
             nn.utils.clip_grad_norm_(
                 self.meta_model.weights(), self.config.w_grad_clip)
-
             self.w_optim.step()
 
         self.task_train_steps += 1
