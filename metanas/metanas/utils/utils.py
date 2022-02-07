@@ -150,6 +150,9 @@ def set_rl_hyperparameters(config):
     config.agent_epochs_per_trial = 3
     config.agent_steps_per_epoch = 400
 
+    # Illegal action masking
+    config.use_agent_mask = config.agent_use_mask
+
     if config.agent == "ppo":
         config.gamma = 0.99
         config.agent_lambda = 0.97
@@ -157,15 +160,11 @@ def set_rl_hyperparameters(config):
         config.agent_n_mini_batch = 4
         config.agent_seq_len = 16
 
-        # Illegal action masking
-        config.use_agent_mask = config.agent_use_mask
-
         # E-RL2 sampling
         config.exploration_sampling = config.agent_exploration
 
     elif config.agent == "random":
-        config.agent_steps_per_trial = (
-            config.agent_epochs_per_trial * config.agent_steps_per_epoch)
+
     else:
         raise RuntimeError(f"No hp parameters for {config.agent} agent")
     return config
