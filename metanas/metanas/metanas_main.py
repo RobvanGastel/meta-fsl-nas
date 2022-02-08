@@ -221,8 +221,7 @@ def _init_meta_rl_agent(config, meta_model):
                             seed=config.seed,
                             steps_per_worker=config.agent_steps_per_epoch,
                             logger_kwargs=config.logger_kwargs,
-                            is_nas_env=True)
-        # TODO: Add mask to Random agent
+                            use_mask=config.use_agent_mask, is_nas_env=True)
     elif config.agent == "ppo":
         agent = PPO(config, meta_model,
                     [env_normal],

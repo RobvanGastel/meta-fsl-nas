@@ -267,13 +267,14 @@ class NasEnv(gym.Env):
             _, topk_edge_indices = torch.topk(edge_max.view(-1), k=2)
 
             # one-hot edges: Tensor(n_edges, n_ops)
-            edge_one_hot = torch.zeros_like(edges[:, :])
-            for hot_e, op in zip(edge_one_hot, edge_idx):
-                hot_e[op.item()] = 1
+            # TODO
+            # edge_one_hot = torch.zeros_like(edges[:, :])
+            # for hot_e, op in zip(edge_one_hot, edge_idx):
+            #     hot_e[op.item()] = 1
 
-            for j, edge in enumerate(edge_one_hot):
-                self.discrete_alphas.append(edge.detach().numpy())
-                self.discrete_alphas.append(edge.detach().numpy())
+            # for j, edge in enumerate(edge_one_hot):
+            #     self.discrete_alphas.append(edge.detach().numpy())
+            #     self.discrete_alphas.append(edge.detach().numpy())
 
             # TODO
             for j, edge in enumerate(edges[:, :]):
@@ -286,8 +287,8 @@ class NasEnv(gym.Env):
 
                 # Store to check if edge has changed
                 # TODO
-                # self.discrete_alphas.append(edge.detach().numpy())
-                # self.discrete_alphas.append(edge.detach().numpy())
+                self.discrete_alphas.append(edge.detach().numpy())
+                self.discrete_alphas.append(edge.detach().numpy())
 
                 # For undirected edge we add the edge twice
                 self.states.append(
@@ -636,10 +637,10 @@ class NasEnv(gym.Env):
 
                 # Only "Calculate reward/do_update" for reward if
                 # in top-k
-                # self.do_update = update
+                self.do_update = update
                 # TODO
-                self.do_update = edge_become_topk(
-                    prev_states, self.states, self.discrete_alphas, s_idx)
+                # self.do_update = edge_become_topk(
+                #     prev_states, self.states, self.discrete_alphas, s_idx)
 
             # Set current state again!
             self.current_state = self.states[s_idx]
@@ -672,10 +673,10 @@ class NasEnv(gym.Env):
 
                 # Only "Calculate reward/do_update" for reward if
                 # in top-k or if the topk edge changed.
-                # self.do_update = update
+                self.do_update = update
                 # TODO
-                self.do_update = edge_become_topk(
-                    prev_states, self.states, self.discrete_alphas, s_idx)
+                # self.do_update = edge_become_topk(
+                #     prev_states, self.states, self.discrete_alphas, s_idx)
 
             # Set current state again!
             self.current_state = self.states[s_idx]

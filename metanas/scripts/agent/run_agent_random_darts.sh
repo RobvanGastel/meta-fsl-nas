@@ -20,7 +20,7 @@ echo "Start run ${AGENT}, variables: epochs = ${EPOCHS}, warm up variables = ${W
 
 for SEED in ${SEEDS}
 do
-    TRAIN_DIR=/home/TUE/20184291/meta-fsl-nas/metanas/results/${DATASET}_n${N}_k${K}/${AGENT}_metad2a_env_1/seed_$SEED
+    TRAIN_DIR=/home/TUE/20184291/meta-fsl-nas/metanas/results/${DATASET}_n${N}_k${K}/${AGENT}_metad2a_env_cont_super/seed_$SEED
 	mkdir -p $TRAIN_DIR
 
     args=(
@@ -73,15 +73,15 @@ do
         --use_first_order_darts \
         --use_torchmeta_loader \
 
-        # Pick DARTS improvements
         # Custom DARTS adjustments
-        # --dropout_skip_connections \
+        --dropout_skip_connections \
 
         # Default M=2,
-        # --use_limit_skip_connection \
+        --use_limit_skip_connection \
 
 		# Environment DARTS
-		--darts_estimation_steps 8 \
+        --use_meta_model \
+		--darts_estimation_steps 7 \
         --env_update_weights_and_alphas \
         --env_disable_pairwise_alphas \
 
@@ -94,6 +94,9 @@ do
 
         # meta-RL agent
         --agent ${AGENT} \
+        
+        # Use policy masking illegal actions
+        --agent_use_mask \
     )
 
     python -u -m metanas.metanas_main "${args[@]}"
