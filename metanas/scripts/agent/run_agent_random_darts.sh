@@ -4,7 +4,7 @@ source /home/TUE/20184291/miniconda3/etc/profile.d/conda.sh
 source activate metanas
 
 # parameters
-EPOCHS=100
+EPOCHS=50
 WARM_UP=0
 SEEDS=(2)
 
@@ -12,7 +12,7 @@ DATASET=omniglot
 N=1
 K=20
 DATASET_DIR=/home/TUE/20184291/meta-fsl-nas/data
-EVAL_FREQ=25
+EVAL_FREQ=10
 
 AGENT=random
 
@@ -94,7 +94,7 @@ do
 
         # meta-RL agent
         --agent ${AGENT} \
-        
+
         # Use policy masking illegal actions
         --agent_use_mask \
     )
