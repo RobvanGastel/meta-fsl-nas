@@ -192,6 +192,9 @@ class RandomAgent(RL_agent):
             for w, worker in enumerate(self.workers):
                 obs, rew, done, info = worker.child.recv()
 
+                if self.use_mask:
+                    mask = info['mask']
+
                 # Track episode statistics
                 ep_stats['ep_len'][w] += 1
                 ep_stats['ep_rew'][w] += rew
