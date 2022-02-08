@@ -245,6 +245,7 @@ class RandomAgent(RL_agent):
         if self.is_nas_env:
             log_board['Environment'] = [
                 'NumAlphaAdj', 'NumEstimations', 'Acc', 'MaxTrialAcc',
+                'TestFinetuneAcc', 'TestFinetuneLoss',
                 'NumEdgeTrav', 'NumIllegalEdgeTrav', 'NumAlphaAdjBeforeTrav',
                 'UniqueEdges'
             ]
