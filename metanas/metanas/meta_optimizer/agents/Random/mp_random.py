@@ -58,6 +58,7 @@ class RandomAgent(RL_agent):
         assert len(envs) == self.n_workers, \
             "The number of environments should equal to the number of workers"
 
+        self.max_acc = 0.0
         self.workers = [Worker(env) for env in envs]
 
     def run_test_trial(self, single_episode=False):
@@ -230,6 +231,8 @@ class RandomAgent(RL_agent):
                 worker.child.send(("close", None))
         except:
             pass
+
+        return self.max_meta_model
 
     def log_trial(self, start_time, trial):
         log_board = {'Performance': ['EpRet', 'EpLen', 'Time']}
