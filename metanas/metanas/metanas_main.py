@@ -219,6 +219,7 @@ def _init_meta_rl_agent(config, meta_model):
         agent = RandomAgent(config, meta_model,
                             [env_normal],
                             seed=config.seed,
+                            epochs=config.agent_epochs_per_trial,
                             steps_per_worker=config.agent_steps_per_epoch,
                             logger_kwargs=config.logger_kwargs,
                             use_mask=config.use_agent_mask, is_nas_env=True)
@@ -422,7 +423,9 @@ def meta_rl_optimization(
 
     # Save weights of the agent
     if (meta_epoch % config.print_freq == 0) or \
-            (meta_epoch == config.meta_epochs) and not test_phase:
+            (meta_epoch == config.meta_epochs) and \
+            config.agent == "ppo" and \
+            not test_phase:
         agent_vars = {"steps": agent.total_steps,
                       "test_steps": agent.total_test_steps,
                       "epoch": agent.total_epochs}

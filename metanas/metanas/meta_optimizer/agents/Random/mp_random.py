@@ -24,7 +24,8 @@ class RandomPolicy:
 
 class RandomAgent(RL_agent):
     def __init__(self, config, meta_model, envs, logger_kwargs=dict(), seed=42,
-                 steps_per_worker=2500, is_nas_env=False, use_mask=False):
+                 steps_per_worker=2500, epochs=100,
+                 is_nas_env=False, use_mask=False):
         super().__init__(config, envs[0], logger_kwargs,
                          seed, 0, 0)
 
@@ -42,6 +43,8 @@ class RandomAgent(RL_agent):
         self.total_test_steps = 0
         self.steps_per_worker = steps_per_worker
 
+        self.epochs = epochs
+        self.total_epochs = 0
         self.total_trials = 0
 
         self.max_acc = 0.0
@@ -232,6 +235,8 @@ class RandomAgent(RL_agent):
         except:
             pass
 
+        self.total_epochs += self.agent_epochs_per_trial
+
         return self.max_meta_model
 
     def log_trial(self, start_time, trial):
@@ -239,7 +244,7 @@ class RandomAgent(RL_agent):
 
         if self.is_nas_env:
             log_board['Environment'] = [
-                'NumAlphaAdj', 'NumEstimations', 'Acc', 'TestAcc',
+                'NumAlphaAdj', 'NumEstimations', 'Acc', 'MaxTrialAcc',
                 'NumEdgeTrav', 'NumIllegalEdgeTrav', 'NumAlphaAdjBeforeTrav',
                 'UniqueEdges'
             ]
@@ -272,7 +277,12 @@ class RandomAgent(RL_agent):
             self.logger.log_tabular(
                 'Acc', average_only=True, with_min_and_max=True)
             self.logger.log_tabular(
-                'TestAcc', average_only=True, with_min_and_max=True)
+                'MaxTrialAcc', average_only=True, with_min_and_max=True)
+
+            self.logger.log_tabular(
+                'TestFinetuneAcc', average_only=True, with_min_and_max=True)
+            self.logger.log_tabular(
+                'TestFinetuneLoss', average_only=True, with_min_and_max=True)
 
             self.logger.log_tabular('NumAlphaAdj', average_only=True)
             self.logger.log_tabular('NumEstimations', average_only=True)
