@@ -271,9 +271,13 @@ class NasEnv(gym.Env):
             for hot_e, op in zip(edge_one_hot, edge_idx):
                 hot_e[op.item()] = 1
 
-            # TODO
-            # for j, edge in enumerate(edges[:, :]):
             for j, edge in enumerate(edge_one_hot):
+                self.discrete_alphas.append(edge.detach().numpy())
+                self.discrete_alphas.append(edge.detach().numpy())
+
+            # TODO
+            for j, edge in enumerate(edges[:, :]):
+                # for j, edge in enumerate(edge_one_hot):
                 self.edge_to_index[(j, i+2)] = s_idx
                 self.edge_to_index[(i+2, j)] = s_idx+1
 
@@ -282,8 +286,8 @@ class NasEnv(gym.Env):
 
                 # Store to check if edge has changed
                 # TODO
-                self.discrete_alphas.append(edge.detach().numpy())
-                self.discrete_alphas.append(edge.detach().numpy())
+                # self.discrete_alphas.append(edge.detach().numpy())
+                # self.discrete_alphas.append(edge.detach().numpy())
 
                 # For undirected edge we add the edge twice
                 self.states.append(
@@ -1169,8 +1173,8 @@ def edge_become_topk(prev_dict, states, alphas, s_idx):
         if (prev_topk[s_idx] < topk[s_idx]):
             return True
 
-        # Is this necessary?
-        return (prev_alphas[s_idx] < alphas[s_idx]).any()
+        # TODO
+        # return (prev_alphas[s_idx] < alphas[s_idx]).any()
 
     return False
 
