@@ -5,22 +5,23 @@ source activate metanas
 
 # parameters
 EPOCHS=50
-WARM_UP=0
-SEEDS=(2)
-
-DATASET=omniglot
-N=1
-K=20
-DATASET_DIR=/home/TUE/20184291/meta-fsl-nas/data
 EVAL_FREQ=10
+WARM_UP=0
+SEEDS=(1 2)
 
-AGENT=ppo
+AGENT=random
+DATASET_DIR=/home/rob/Git/meta-fsl-nas/data
+DATASET=miniimagenet
+
+N=5
+K=5
+
 
 echo "Start run ${AGENT}, variables: epochs = ${EPOCHS}, warm up variables = ${WARM_UP}, seeds = ${SEEDS[@]}, dataset = ${DATASET}"
 
 for SEED in ${SEEDS}
 do
-    TRAIN_DIR=/home/TUE/20184291/meta-fsl-nas/metanas/results/${DATASET}_n${N}_k${K}/${AGENT}_darts_env_cont_super_topk/seed_$SEED
+    TRAIN_DIR=/home/rob/Git/meta-fsl-nas/metanas/results/${DATASET}_n${N}_k${K}/${AGENT}/tse_darts_env_cont_super_topk/seed_$SEED
 	mkdir -p $TRAIN_DIR
 
     args=(
@@ -73,20 +74,21 @@ do
         --use_first_order_darts \
         --use_torchmeta_loader \
 
+
+		# Environment DARTS
+        --use_meta_model \
+		--darts_estimation_steps 5 \
+        --env_update_weights_and_alphas \
+        --env_disable_pairwise_alphas \
+
+        # TSE darts
+        --use_tse_darts \
+
         # Custom DARTS adjustments
         --dropout_skip_connections \
 
         # Default M=2,
         --use_limit_skip_connection \
-
-		# Environment DARTS
-        --use_meta_model \
-		--darts_estimation_steps 7 \
-        --env_update_weights_and_alphas \
-        --env_disable_pairwise_alphas \
-
-        # TSE darts
-        # --use_tse_darts \
 
         # Environment
         --use_env_random_start \

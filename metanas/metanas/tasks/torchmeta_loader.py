@@ -56,8 +56,7 @@ def sample_meta_batch(
     for task_idx in range(num_tasks):
 
         if validation_set:
-            # TODO: Only for hardcoded variables
-            # 0.8 training set, 0.2 validation set
+            # todo 0.8 training set, 0.2 validation set
             task_train_sampler = RandomSampler(
                 range(int(15 * 5 * 0.8)),
                 replacement=True,

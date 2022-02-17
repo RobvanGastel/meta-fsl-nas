@@ -175,7 +175,20 @@ class NasEnv(gym.Env):
         self.step_count = 0
 
         # Reset alphas and weights of the model
-        self.meta_model.load_state_dict(self.meta_state)
+        self.meta_model.load_state_dict(copy.deepcopy(self.meta_state))
+
+        # TODO:
+        # n_ops = len(self.meta_model.primitives)
+        # self.meta_model.alpha_normal = nn.ParameterList()
+        # self.meta_model.alpha_reduce = nn.ParameterList()
+
+        # for i in range(self.config.nodes):
+        #     # create alpha parameters over parallel operations,
+        #     self.meta_model.alpha_normal.append(nn.Parameter(
+        #         1e-3 * torch.randn(i + 2, n_ops)))
+        #     self.meta_model.alpha_reduce.append(nn.Parameter(
+        #         1e-3 * torch.randn(i + 2, n_ops)))
+
         self.update_states()
 
         if not self.reward_estimation:
@@ -268,13 +281,13 @@ class NasEnv(gym.Env):
 
             # one-hot edges: Tensor(n_edges, n_ops)
             # TODO
-            # edge_one_hot = torch.zeros_like(edges[:, :])
-            # for hot_e, op in zip(edge_one_hot, edge_idx):
-            #     hot_e[op.item()] = 1
+            edge_one_hot = torch.zeros_like(edges[:, :])
+            for hot_e, op in zip(edge_one_hot, edge_idx):
+                hot_e[op.item()] = 1
 
-            # for j, edge in enumerate(edge_one_hot):
-            #     self.discrete_alphas.append(edge.detach().numpy())
-            #     self.discrete_alphas.append(edge.detach().numpy())
+            for j, edge in enumerate(edge_one_hot):
+                self.discrete_alphas.append(edge.detach().numpy())
+                self.discrete_alphas.append(edge.detach().numpy())
 
             # TODO
             for j, edge in enumerate(edges[:, :]):
@@ -287,8 +300,8 @@ class NasEnv(gym.Env):
 
                 # Store to check if edge has changed
                 # TODO
-                self.discrete_alphas.append(edge.detach().numpy())
-                self.discrete_alphas.append(edge.detach().numpy())
+                # self.discrete_alphas.append(edge.detach().numpy())
+                # self.discrete_alphas.append(edge.detach().numpy())
 
                 # For undirected edge we add the edge twice
                 self.states.append(
@@ -559,12 +572,13 @@ class NasEnv(gym.Env):
 
                 # Compute reward after updating
                 if self.do_update:
-                    self.acc_estimations += 1
-                    reward, acc = self.compute_reward()
                     self.do_update = False
 
                     if not check_if_visited(self.encourage_edges,
                                             cur_node, next_node):
+
+                        self.acc_estimations += 1
+                        reward, acc = self.compute_reward()
 
                         # Increase the edge visists, (a, b) = (b,a)
                         increase_edge(self.encourage_edges,
@@ -583,15 +597,7 @@ class NasEnv(gym.Env):
                         if self.encourage_exploration:
                             # Decrease later rewards
                             if reward > 0.0:
-
-                                multiplier = get_edge_vists(
-                                    self.encourage_edges, cur_node, next_node)
-
-                                dec_multi = 1
-                                for i in [self.encourage_decrease]*multiplier:
-                                    dec_multi *= i
-
-                                reward = reward * dec_multi
+                                reward = reward * self.encourage_decrease
 
                 # States might change due to DARTS reward estimation
                 self.update_states()
@@ -635,12 +641,14 @@ class NasEnv(gym.Env):
                 # Update the local state after increasing the alphas
                 prev_states = self.update_states()
 
-                # Only "Calculate reward/do_update" for reward if
-                # in top-k
-                self.do_update = update
                 # TODO
-                # self.do_update = edge_become_topk(
-                #     prev_states, self.states, self.discrete_alphas, s_idx)
+                if self.do_update is False:
+                    self.do_update = update
+
+                    # Only "Calculate reward/do_update" for reward if
+                    # in top-k
+                    # self.do_update = edge_become_topk(
+                    #     prev_states, self.states, self.discrete_alphas, s_idx)
 
             # Set current state again!
             self.current_state = self.states[s_idx]
@@ -671,12 +679,13 @@ class NasEnv(gym.Env):
                 # Update the local state after increasing the alphas
                 prev_states = self.update_states()
 
-                # Only "Calculate reward/do_update" for reward if
-                # in top-k or if the topk edge changed.
-                self.do_update = update
                 # TODO
-                # self.do_update = edge_become_topk(
-                #     prev_states, self.states, self.discrete_alphas, s_idx)
+                if self.do_update is False:
+                    self.do_update = update
+                    # Only "Calculate reward/do_update" for reward if
+                    # in top-k or if the topk edge changed.
+                    # self.do_update = edge_become_topk(
+                    #     prev_states, self.states, self.discrete_alphas, s_idx)
 
             # Set current state again!
             self.current_state = self.states[s_idx]
@@ -711,6 +720,9 @@ class NasEnv(gym.Env):
 
         # Scale reward to (min_rew, max_rew) range, [-min, max]
         reward = self.scale_postive_reward(acc)
+
+        # TODO: Extra reward based on estimations
+        reward += self.acc_estimations * 0.2
 
         if self.max_acc < acc:
             self.max_acc = acc
@@ -762,7 +774,7 @@ class NasEnv(gym.Env):
         # [0.5, 1]
         if self.baseline_acc <= accuracy:
             a1, a2 = self.baseline_acc, 1.0
-            b1, b2 = 0.5, self.max_rew
+            b1, b2 = 0.2, self.max_rew
 
             reward = b1 + ((accuracy-a1)*(b2-b1)) / (a2-a1)
 

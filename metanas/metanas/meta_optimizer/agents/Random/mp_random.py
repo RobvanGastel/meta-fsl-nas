@@ -24,7 +24,7 @@ class RandomPolicy:
 
 class RandomAgent(RL_agent):
     def __init__(self, config, meta_model, envs, logger_kwargs=dict(), seed=42,
-                 steps_per_worker=2500, epochs=100,
+                 steps_per_worker=2500, epochs=3,
                  is_nas_env=False, use_mask=False):
         super().__init__(config, envs[0], logger_kwargs,
                          seed, 0, 0)
@@ -36,11 +36,10 @@ class RandomAgent(RL_agent):
         self.n_workers = len(envs)
         self.workers = [Worker(env) for env in envs]
 
-        self.agent_epochs_per_trial = config.agent_epochs_per_trial
-
         # Steps variables
-        self.total_steps = 0
-        self.total_test_steps = 0
+        self.total_episodes = 0
+        self.total_test_episodes = 0
+        # Steps per epochs, * number epochs
         self.steps_per_worker = steps_per_worker
 
         self.epochs = epochs
@@ -64,7 +63,7 @@ class RandomAgent(RL_agent):
         self.max_acc = 0.0
         self.workers = [Worker(env) for env in envs]
 
-    def run_test_trial(self, single_episode=False):
+    def run_test_trial(self):
 
         # Track statistics
         ep_stats = {'ep_len': np.zeros(self.n_workers),
@@ -75,6 +74,9 @@ class RandomAgent(RL_agent):
                  'MetaTestEpRet': {i: [] for i in range(self.n_workers)},
                  'MetaTestAcc': {i: [] for i in range(self.n_workers)},
                  'MetaTestMaxAcc': {i: [] for i in range(self.n_workers)}}
+
+        self.number_episodes = self.config.agent_test_episodes
+        self.current_episodes = 0
 
         # Reset environments
         for worker in self.workers:
@@ -136,14 +138,14 @@ class RandomAgent(RL_agent):
                     ep_stats['ep_len'][w] = 0
                     ep_stats['ep_rew'][w] = 0
 
-                    # TODO: Only works for workers=1
-                    if single_episode:
-                        break
+                    self.current_episodes += 1
+                    self.total_test_episodes += 1
 
                 if self.use_mask:
                     self.masks[w] = mask
 
-            self.total_test_steps += self.n_workers
+            if self.current_episodes == self.number_episodes:
+                break
 
         # Close the workers at the end of the trial
         try:
@@ -171,6 +173,9 @@ class RandomAgent(RL_agent):
         ep_stats = {'ep_len': np.zeros(self.n_workers),
                     'ep_rew': np.zeros(self.n_workers)}
 
+        self.number_episodes = self.config.agent_train_episodes * self.epochs
+        self.current_episodes = 0
+
         # Reset environments
         for worker in self.workers:
             worker.child.send(("reset", None))
@@ -182,7 +187,7 @@ class RandomAgent(RL_agent):
                 worker.child.recv()
 
         for t in range(
-                self.steps_per_worker * self.agent_epochs_per_trial):
+                self.steps_per_worker * self.epochs):
             if self.use_mask:
                 actions = self.policy.act(self.masks)
             else:
@@ -223,10 +228,14 @@ class RandomAgent(RL_agent):
                     ep_stats['ep_len'][w] = 0
                     ep_stats['ep_rew'][w] = 0
 
+                    self.current_episodes += 1
+                    self.total_episodes += 1
+
                 if self.use_mask:
                     self.masks[w] = mask
 
-            self.total_steps += self.n_workers
+            if self.current_episodes == self.number_episodes:
+                break
 
         # Close the workers at the end of the trial
         try:
@@ -235,7 +244,7 @@ class RandomAgent(RL_agent):
         except:
             pass
 
-        self.total_epochs += self.agent_epochs_per_trial
+        self.total_epochs += self.epochs
 
         return self.max_meta_model
 
@@ -245,7 +254,7 @@ class RandomAgent(RL_agent):
         if self.is_nas_env:
             log_board['Environment'] = [
                 'NumAlphaAdj', 'NumEstimations', 'Acc', 'MaxTrialAcc',
-                'TestFinetuneAcc', 'TestFinetuneLoss',
+                'TestFinetuneAcc', 'TestFinetuneLoss', 'TestFinetuneParam',
                 'NumEdgeTrav', 'NumIllegalEdgeTrav', 'NumAlphaAdjBeforeTrav',
                 'UniqueEdges'
             ]
@@ -258,18 +267,18 @@ class RandomAgent(RL_agent):
                     if val == 'Time':
                         self.summary_writer.add_scalar(
                             key+'/Time', time.time()-start_time,
-                            self.total_steps)
+                            self.total_episodes)
                     else:
                         self.summary_writer.add_scalar(
-                            key+'/Average'+val, mean, self.total_steps)
+                            key+'/Average'+val, mean, self.total_episodes)
                         self.summary_writer.add_scalar(
-                            key+'/Std'+val, std, self.total_steps)
+                            key+'/Std'+val, std, self.total_episodes)
                 else:
                     self.summary_writer.add_scalar(
-                        key+'/'+val, mean, self.total_steps)
+                        key+'/'+val, mean, self.total_episodes)
 
         # Log to console with SpinningUp logger
-        self.logger.log_tabular('Epoch', trial)
+        self.logger.log_tabular('Epoch', trial//2)
         self.logger.log_tabular('EpRet', with_min_and_max=True)
         self.logger.log_tabular('EpLen', average_only=True)
 
@@ -281,9 +290,11 @@ class RandomAgent(RL_agent):
                 'MaxTrialAcc', average_only=True, with_min_and_max=True)
 
             self.logger.log_tabular(
-                'TestFinetuneAcc', average_only=True, with_min_and_max=True)
+                'TestFinetuneAcc', average_only=True)
             self.logger.log_tabular(
-                'TestFinetuneLoss', average_only=True, with_min_and_max=True)
+                'TestFinetuneLoss', average_only=True)
+            self.logger.log_tabular(
+                'TestFinetuneParam', average_only=True)
 
             self.logger.log_tabular('NumAlphaAdj', average_only=True)
             self.logger.log_tabular('NumEstimations', average_only=True)
@@ -305,15 +316,19 @@ class RandomAgent(RL_agent):
 
         for key in log_board['Testing']:
             self.summary_writer.add_scalar(
-                'Testing/Average'+key, stats[key], self.total_test_steps)
+                'Testing/Average'+key, stats[key], self.total_test_episodes)
 
     def log_test_test_accuracy(self, task_info):
+
         self.summary_writer.add_scalar(
             'Testing/MetaTestTestFinetuneAcc',
-            task_info.top1, self.total_test_steps)
+            task_info.top1, self.total_test_episodes)
+        self.summary_writer.add_scalar(
+            'Testing/MetaTestTestFinetuneParam',
+            int(task_info.sparse_num_params//1000), self.total_test_episodes)
         self.summary_writer.add_scalar(
             'Testing/MetaTestTestFinetuneLoss',
-            task_info.loss, self.total_test_steps)
+            task_info.loss, self.total_test_episodes)
 
     def _log_nas_info_dict(self, info_dict):
         """Log NAS environment information

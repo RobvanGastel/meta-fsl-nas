@@ -4,23 +4,23 @@ source /home/TUE/20184291/miniconda3/etc/profile.d/conda.sh
 source activate metanas
 
 # parameters
-EPOCHS=150
+EPOCHS=50
+EVAL_FREQ=10
 WARM_UP=0
-SEEDS=(2)
-
-DATASET=omniglot
-N=1
-K=20
-DATASET_DIR=/home/TUE/20184291/meta-fsl-nas/data
-EVAL_FREQ=25
+SEEDS=(1 2)
 
 AGENT=ppo
+DATASET_DIR=/home/rob/Git/meta-fsl-nas/data
+DATASET=miniimagenet
+
+N=5
+K=5
 
 echo "Start run ${AGENT}, variables: epochs = ${EPOCHS}, warm up variables = ${WARM_UP}, seeds = ${SEEDS[@]}, dataset = ${DATASET}"
 
 for SEED in ${SEEDS}
 do
-    TRAIN_DIR=/home/TUE/20184291/meta-fsl-nas/metanas/results/${DATASET}_n${N}_k${K}/${AGENT}_metad2a_env_traj_50_w_betas/seed_$SEED
+    TRAIN_DIR=/home/rob/Git/meta-fsl-nas/metanas/results/${DATASET}_n${N}_k${K}/${AGENT}/darts_env_cont_super_topk/seed_$SEED
 	mkdir -p $TRAIN_DIR
 
     args=(
@@ -30,7 +30,7 @@ do
         --path ${TRAIN_DIR} \
         --data_path ${DATASET_DIR} \
         --dataset $DATASET
-        --hp_setting 'og_metanas' \
+        --hp_setting 'in_metanas' \
         --use_hp_setting 1 \
         --workers 0 \
         --gpus 0 \
@@ -61,7 +61,7 @@ do
 
         --normalizer softmax \
         --normalizer_temp_anneal_mode linear \
-        --normalizer_t_min 0.05 \
+        --normalizer_t_min 0.1 \
         --normalizer_t_max 1.0 \
         --drop_path_prob 0.2 \
 
@@ -73,15 +73,9 @@ do
         --use_first_order_darts \
         --use_torchmeta_loader \
 
-        # Pick DARTS improvements
-        # Custom DARTS adjustments
-        # --dropout_skip_connections \
-
-        # Default M=2,
-        # --use_limit_skip_connection \
-
 		# Environment DARTS
-		--darts_estimation_steps 8 \
+        --use_meta_model \
+		--darts_estimation_steps 5 \
         --env_update_weights_and_alphas \
         --env_disable_pairwise_alphas \
 
@@ -91,18 +85,11 @@ do
         --env_encourage_exploration \
         --env_min_rew 0.00 \
         --env_max_rew 1.00 \
-
-		# MetaD2A estimation
-		--use_metad2a_estimation \
-        --primitives_type nasbench201 \
-
-		--rew_data_path /home/TUE/20184291/meta-fsl-nas/metanas/data/ \
-        --rew_model_path /home/TUE/20184291/meta-fsl-nas/metanas/data/meta_predictor/predictor_max_corr.pt \
-
+        
         # meta-RL agent
         --agent ${AGENT} \
         # E-RL2 batch sampling
-		--agent_exploration \
+        --agent_exploration \
         --agent_hidden_size 256 \
 
         # Use policy masking illegal actions

@@ -71,6 +71,21 @@ def set_hyperparameter(config):
         config.w_meta_anneal = 0
         config.w_task_anneal = 0
 
+    elif config.hp_setting == "og_tse_metanas":  # setting for MetaNAS
+        config.task_train_steps = 5
+        config.n_train = 15
+        config.batch_size = 20
+        config.batch_size_test = 10
+        config.meta_batch_size = 10
+        config.w_lr = 0.04
+        config.alpha_lr = 0.04
+        config.w_meta_lr = 1.0
+        config.a_meta_lr = 0.6
+        config.a_meta_anneal = 0
+        config.a_task_anneal = 0
+        config.w_meta_anneal = 0
+        config.w_task_anneal = 0
+
     elif config.hp_setting == "og":  # default setting from REPTILE paper
         print("Using 'og' hp setting")
         config.task_train_steps = 10
@@ -138,17 +153,24 @@ def set_rl_hyperparameters(config):
     # Configure DARTS estimation
     config.update_weights_and_alphas = config.env_update_weights_and_alphas
     config.darts_estimation_steps = config.darts_estimation_steps+1
+
+    # Log actions
+    config.action_path = os.path.join(
+        config.path + "action_dict.shlv")
+
     # Environment exploration
     config.encourage_exploration = config.env_encourage_exploration
     config.encourage_increase = 1.0
     config.encourage_decrease = 0.0
 
-    config.env_alpha_probability = 0.1
+    config.env_alpha_probability = 0.10
     config.env_max_ep_len = 200
 
     # Agent configuration
     config.agent_epochs_per_trial = 3
-    config.agent_steps_per_epoch = 400
+    config.agent_train_episodes = 4
+    config.agent_test_episodes = 4
+    config.agent_steps_per_epoch = config.agent_train_episodes * config.env_max_ep_len
 
     if config.agent == "ppo":
         config.gamma = 0.99

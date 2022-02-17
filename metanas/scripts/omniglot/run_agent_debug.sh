@@ -4,24 +4,25 @@ source /home/TUE/20184291/miniconda3/etc/profile.d/conda.sh
 source activate metanas
 
 # parameters
-EPOCHS=50
+EPOCHS=100
 WARM_UP=0
 SEEDS=(2)
 
 DATASET=omniglot
-N=1
-K=20
-DATASET_DIR=/home/TUE/20184291/meta-fsl-nas/data
-EVAL_FREQ=10
+N=5
+K=5
+DATASET_DIR=/home/rob/Git/meta-fsl-nas/data
+EVAL_FREQ=1
 
-AGENT=random
+AGENT=ppo
 
 echo "Start run ${AGENT}, variables: epochs = ${EPOCHS}, warm up variables = ${WARM_UP}, seeds = ${SEEDS[@]}, dataset = ${DATASET}"
 
 for SEED in ${SEEDS}
 do
-    TRAIN_DIR=/home/TUE/20184291/meta-fsl-nas/metanas/results/${DATASET}_n${N}_k${K}/${AGENT}_metad2a_env_cont_super/seed_$SEED
-	mkdir -p $TRAIN_DIR
+    TRAIN_DIR=/home/rob/Git/meta-fsl-nas/metanas/results/${AGENT}_debug/seed_$SEED
+
+    mkdir -p $TRAIN_DIR
 
     args=(
         # Execution
@@ -30,7 +31,7 @@ do
         --path ${TRAIN_DIR} \
         --data_path ${DATASET_DIR} \
         --dataset $DATASET
-        --hp_setting 'og_metanas' \
+        --hp_setting 'test_exp' \
         --use_hp_setting 1 \
         --workers 0 \
         --gpus 0 \
@@ -57,7 +58,7 @@ do
 
         --eval_freq $EVAL_FREQ \
         --eval_epochs 50 \
-        --print_freq 100 \
+        --print_freq 5 \
 
         --normalizer softmax \
         --normalizer_temp_anneal_mode linear \
@@ -66,35 +67,40 @@ do
         --drop_path_prob 0.2 \
 
         # Architectures
-        --init_channels 28 \
-        --layers 4 \
-        --nodes 3 \
+        --init_channels 14 \
+        --layers 3 \
+        --nodes 2 \
         --reduction_layers 1 3 \
         --use_first_order_darts \
         --use_torchmeta_loader \
 
-        # Custom DARTS adjustments
-        --dropout_skip_connections \
+        # DARTS training adjustments
+        # --dropout_skip_connections \
 
-        # Default M=2,
-        --use_limit_skip_connection \
+        # # Default M=2,
+        # --use_limit_skip_connection \
 
-		# Environment DARTS
+        # Environment
         --use_meta_model \
-		--darts_estimation_steps 7 \
+        --darts_estimation_steps 5 \
         --env_update_weights_and_alphas \
         --env_disable_pairwise_alphas \
 
-		# Environment
+        # --use_tse_darts \
+        --use_validation_set \
+
         --use_env_random_start \
 
         --env_encourage_exploration \
         --env_min_rew 0.00 \
         --env_max_rew 1.00 \
 
-        # meta-RL agent
+        # meta-RL optimization
         --agent ${AGENT} \
-
+        # E-RL2 batch sampling
+        --agent_exploration \
+        --agent_hidden_size 256 \
+        
         # Use policy masking illegal actions
         --agent_use_mask \
     )

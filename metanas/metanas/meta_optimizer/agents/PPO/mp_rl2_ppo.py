@@ -41,8 +41,8 @@ class PPO(RL_agent):
         self.exploration_sampling = exploration_sampling
 
         # Steps variables
-        self.total_steps = 0
-        self.total_test_steps = 0
+        self.total_episodes = 0
+        self.total_test_episodes = 0
 
         self.epochs = epochs
         self.total_epochs = 0
@@ -80,6 +80,8 @@ class PPO(RL_agent):
         self.optimizer = Adam(self.ac.parameters(), lr=lr, eps=1e-5)
         # self.optimizer = AdamW(self.ac.parameters(), lr=lr)
 
+        self.action_dict = {str(i): 0 for i in range(act_dim)}
+
         # Load existing model
         if model_path['model'] and model_path['vars']:
             meta_state = torch.load(model_path['model'])
@@ -87,8 +89,8 @@ class PPO(RL_agent):
             self.optimizer.load_state_dict(meta_state['opt'].state_dict())
 
             vars_dict = pickle.load(open(model_path['vars'], 'r'))
-            self.total_steps = vars_dict['steps']
-            self.total_test_steps = vars_dict['test_steps']
+            self.total_episodes = vars_dict['episodes']
+            self.total_test_episodes = vars_dict['test_episodes']
             self.total_epochs = vars_dict['epoch']
 
             # Set up model saving
@@ -122,7 +124,7 @@ class PPO(RL_agent):
 
         self.workers = [Worker(env) for env in envs]
 
-    def run_test_trial(self, single_episode=False):
+    def run_test_trial(self):
         """Run single meta-reinforcement learning testing trial for a given
         number of worker steps.
         """
@@ -140,6 +142,9 @@ class PPO(RL_agent):
         # RL2 variables
         prev_act = np.zeros((self.n_workers,))
         prev_rew = np.zeros((self.n_workers,))
+
+        self.number_episodes = self.config.agent_test_episodes
+        self.current_episodes = 0
 
         # Set hidden states, resets each trial
         self.hidden_states = torch.zeros(
@@ -209,16 +214,16 @@ class PPO(RL_agent):
                     ep_stats['ep_len'][w] = 0
                     ep_stats['ep_rew'][w] = 0
 
-                    # TODO: Only works for workers=1
-                    if single_episode:
-                        break
+                    self.current_episodes += 1
+                    self.total_test_episodes += 1
 
                 # Store latest observations
                 self.obs[w] = obs
                 if self.use_mask:
                     self.masks[w] = mask
 
-            self.total_test_steps += self.n_workers
+            if self.current_episodes == self.number_episodes:
+                break
 
         # Close the workers at the end of the trial
         try:
@@ -249,6 +254,10 @@ class PPO(RL_agent):
             dict: The final information dictionary of the trial
         """
 
+        # Set hidden states, resets each trial
+        self.hidden_states = torch.zeros(
+            [1, self.n_workers, self.hidden_size]).to(self.device)
+
         for _ in range(self.epochs):
 
             # Sample environment steps
@@ -273,6 +282,7 @@ class PPO(RL_agent):
         if self.is_nas_env:
             if self.acc_estimated is False:
                 self.logger.store(Acc=0.0)
+                self.logger.store(MaxTrialAcc=0.0)
 
         return self.max_meta_model
 
@@ -359,9 +369,8 @@ class PPO(RL_agent):
         prev_act = np.zeros((self.n_workers,))
         prev_rew = np.zeros((self.n_workers,))
 
-        # Set hidden states, resets each trial
-        self.hidden_states = torch.zeros(
-            [1, self.n_workers, self.hidden_size]).to(self.device)
+        self.number_episodes = self.config.agent_train_episodes
+        self.current_episodes = 0
 
         # Reset environments
         for worker in self.workers:
@@ -432,6 +441,9 @@ class PPO(RL_agent):
                     ep_stats['ep_len'][w] = 0
                     ep_stats['ep_rew'][w] = 0
 
+                    self.current_episodes += 1
+                    self.total_episodes += 1
+
                 # Store latest observations and mask
                 self.obs[w] = obs
                 if self.use_mask:
@@ -441,7 +453,8 @@ class PPO(RL_agent):
             self.buffer.prev_rewards[:, t] = torch.tensor(prev_rew)
             self.buffer.prev_actions[:, t] = torch.tensor(prev_act)
 
-            self.total_steps += self.n_workers
+            if self.current_episodes == self.number_episodes:
+                break
 
         # Calculate advantages
         _, last_value, _, _ = self.get_action(
@@ -465,30 +478,35 @@ class PPO(RL_agent):
         if self.is_nas_env:
             log_board['Environment'] = [
                 'NumAlphaAdj', 'NumEstimations', 'Acc', 'MaxTrialAcc',
-                'TestFinetuneAcc', 'TestFinetuneLoss',
+                'TestFinetuneAcc', 'TestFinetuneLoss', 'TestFinetuneParam',
                 'NumEdgeTrav', 'NumIllegalEdgeTrav', 'NumAlphaAdjBeforeTrav',
                 'UniqueEdges']
 
         for key, value in log_board.items():
             for val in value:
                 if val is not "Time":
-                    mean, std = self.logger.get_stats(val)
+                    try:
+                        mean, std = self.logger.get_stats(val)
+                    except Exception as e:
+                        mean, std = 0, 0
+                        pass
+
                 if key == 'Performance' or key == "Environment":
                     if val == 'Time':
                         self.summary_writer.add_scalar(
                             key+'/Time', time.time()-start_time,
-                            self.total_steps)
+                            self.total_episodes)
                     else:
                         self.summary_writer.add_scalar(
-                            key+'/Average'+val, mean, self.total_steps)
+                            key+'/Average'+val, mean, self.total_episodes)
                         self.summary_writer.add_scalar(
-                            key+'/Std'+val, std, self.total_steps)
+                            key+'/Std'+val, std, self.total_episodes)
                 else:
                     self.summary_writer.add_scalar(
-                        key+'/'+val, mean, self.total_steps)
+                        key+'/'+val, mean, self.total_episodes)
 
         # Log to console with SpinningUp logger
-        self.logger.log_tabular('Epoch', trial)
+        self.logger.log_tabular('Epoch', trial//2)
         self.logger.log_tabular('EpRet', with_min_and_max=True)
         self.logger.log_tabular('EpLen', average_only=True)
 
@@ -504,9 +522,11 @@ class PPO(RL_agent):
             self.logger.log_tabular('MaxTrialAcc', average_only=True)
 
             self.logger.log_tabular(
-                'TestFinetuneAcc', average_only=True, with_min_and_max=True)
+                'TestFinetuneAcc', average_only=True)
             self.logger.log_tabular(
-                'TestFinetuneLoss', average_only=True, with_min_and_max=True)
+                'TestFinetuneLoss', average_only=True)
+            self.logger.log_tabular(
+                'TestFinetuneParam', average_only=True)
 
             self.logger.log_tabular('NumAlphaAdj', average_only=True)
             self.logger.log_tabular('NumEstimations', average_only=True)
@@ -528,15 +548,18 @@ class PPO(RL_agent):
 
         for key in log_board['Testing']:
             self.summary_writer.add_scalar(
-                'Testing/Average'+key, stats[key], self.total_test_steps)
+                'Testing/Average'+key, stats[key], self.total_test_episodes)
 
     def log_test_test_accuracy(self, task_info):
         self.summary_writer.add_scalar(
             'Testing/MetaTestTestFinetuneAcc',
-            task_info.top1, self.total_test_steps)
+            task_info.top1, self.total_test_episodes)
+        self.summary_writer.add_scalar(
+            'Testing/MetaTestTestFinetuneParam',
+            int(task_info.sparse_num_params//1000), self.total_test_episodes)
         self.summary_writer.add_scalar(
             'Testing/MetaTestTestFinetuneLoss',
-            task_info.loss, self.total_test_steps)
+            task_info.loss, self.total_test_episodes)
 
     def _log_nas_info_dict(self, info_dict):
         """Log info dict for NAS environment information
@@ -557,6 +580,8 @@ class PPO(RL_agent):
                     self.meta_model.state_dict())
 
                 self.logger.store(MaxTrialAcc=acc)
+
+        self.action_dict[str(info_dict['action_id'])] += 1
 
         self.logger.store(
             NumIllegalEdgeTrav=info_dict['illegal_edge_traversals'])
