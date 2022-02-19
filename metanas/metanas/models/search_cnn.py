@@ -251,8 +251,10 @@ class SearchCNNController(nn.Module):
 
     def reset_alphas(self, cell):
         n_ops = len(self.primitives)
-        self.alpha_normal = nn.ParameterList()
-        self.alpha_reduce = nn.ParameterList()
+        if cell == "normal":
+            self.alpha_normal = nn.ParameterList()
+        if cell == "reduce":
+            self.alpha_reduce = nn.ParameterList()
 
         for i in range(self.n_nodes):
             if cell == "normal":
