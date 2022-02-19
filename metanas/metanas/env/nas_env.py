@@ -176,7 +176,6 @@ class NasEnv(gym.Env):
 
         # Reset alphas and weights of the model
         self.meta_model.load_state_dict(copy.deepcopy(self.meta_state))
-        self.meta_model.reset_alphas()
 
         self.update_states()
 

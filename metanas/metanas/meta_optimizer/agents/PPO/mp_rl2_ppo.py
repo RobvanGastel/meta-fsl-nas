@@ -143,6 +143,8 @@ class PPO(RL_agent):
         prev_act = np.zeros((self.n_workers,))
         prev_rew = np.zeros((self.n_workers,))
 
+        self.meta_model.reset_alphas()
+
         self.number_episodes = self.config.agent_test_episodes
         self.current_episodes = 0
 
@@ -216,6 +218,8 @@ class PPO(RL_agent):
 
                     self.current_episodes += 1
                     self.total_test_episodes += 1
+
+                    self.meta_model.reset_alphas()
 
                 # Store latest observations
                 self.obs[w] = obs
