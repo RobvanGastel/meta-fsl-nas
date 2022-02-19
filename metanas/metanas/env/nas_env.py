@@ -178,16 +178,16 @@ class NasEnv(gym.Env):
         self.meta_model.load_state_dict(copy.deepcopy(self.meta_state))
 
         # TODO:
-        # n_ops = len(self.meta_model.primitives)
-        # self.meta_model.alpha_normal = nn.ParameterList()
-        # self.meta_model.alpha_reduce = nn.ParameterList()
+        n_ops = len(self.meta_model.primitives)
+        self.meta_model.alpha_normal = nn.ParameterList()
+        self.meta_model.alpha_reduce = nn.ParameterList()
 
-        # for i in range(self.config.nodes):
-        #     # create alpha parameters over parallel operations,
-        #     self.meta_model.alpha_normal.append(nn.Parameter(
-        #         1e-3 * torch.randn(i + 2, n_ops)))
-        #     self.meta_model.alpha_reduce.append(nn.Parameter(
-        #         1e-3 * torch.randn(i + 2, n_ops)))
+        for i in range(self.config.nodes):
+            # create alpha parameters over parallel operations,
+            self.meta_model.alpha_normal.append(nn.Parameter(
+                1e-3 * torch.randn(i + 2, n_ops)))
+            self.meta_model.alpha_reduce.append(nn.Parameter(
+                1e-3 * torch.randn(i + 2, n_ops)))
 
         self.update_states()
 
@@ -645,10 +645,10 @@ class NasEnv(gym.Env):
                 # if self.do_update is False:
                 self.do_update = update
 
-                    # Only "Calculate reward/do_update" for reward if
-                    # in top-k
-                    # self.do_update = edge_become_topk(
-                    #     prev_states, self.states, self.discrete_alphas, s_idx)
+                # Only "Calculate reward/do_update" for reward if
+                # in top-k
+                # self.do_update = edge_become_topk(
+                #     prev_states, self.states, self.discrete_alphas, s_idx)
 
             # Set current state again!
             self.current_state = self.states[s_idx]
@@ -682,10 +682,10 @@ class NasEnv(gym.Env):
                 # if self.do_update is False:
                 self.do_update = update
 
-                    # Only "Calculate reward/do_update" for reward if
-                    # in top-k or if the topk edge changed.
-                    # self.do_update = edge_become_topk(
-                    #     prev_states, self.states, self.discrete_alphas, s_idx)
+                # Only "Calculate reward/do_update" for reward if
+                # in top-k or if the topk edge changed.
+                # self.do_update = edge_become_topk(
+                #     prev_states, self.states, self.discrete_alphas, s_idx)
 
             # Set current state again!
             self.current_state = self.states[s_idx]
