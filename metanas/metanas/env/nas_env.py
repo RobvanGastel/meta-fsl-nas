@@ -176,18 +176,7 @@ class NasEnv(gym.Env):
 
         # Reset alphas and weights of the model
         self.meta_model.load_state_dict(copy.deepcopy(self.meta_state))
-
-        # TODO:
-        n_ops = len(self.meta_model.primitives)
-        self.meta_model.alpha_normal = nn.ParameterList()
-        self.meta_model.alpha_reduce = nn.ParameterList()
-
-        for i in range(self.config.nodes):
-            # create alpha parameters over parallel operations,
-            self.meta_model.alpha_normal.append(nn.Parameter(
-                1e-3 * torch.randn(i + 2, n_ops)))
-            self.meta_model.alpha_reduce.append(nn.Parameter(
-                1e-3 * torch.randn(i + 2, n_ops)))
+        self.meta_model.reset_alphas()
 
         self.update_states()
 
