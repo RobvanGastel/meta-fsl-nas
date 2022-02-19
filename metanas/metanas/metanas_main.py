@@ -248,6 +248,7 @@ def meta_test_rl_optimization(
         config, task, env_normal, env_reduce, agent,
         meta_state, meta_model, meta_epoch):
 
+    # TODO
     meta_model.reset_alphas(cell="normal")
     meta_model.reset_alphas(cell="reduce")
 

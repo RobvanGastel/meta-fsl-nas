@@ -177,9 +177,6 @@ class NasEnv(gym.Env):
         # Reset alphas and weights of the model
         self.meta_model.load_state_dict(copy.deepcopy(self.meta_state))
 
-        # TODO
-        self.meta_model.reset_alphas(cell=self.cell_type)
-
         self.update_states()
 
         if not self.reward_estimation:
