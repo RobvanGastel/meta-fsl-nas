@@ -249,17 +249,19 @@ class SearchCNNController(nn.Module):
             weights_pw_reduce,
         )
 
-    def reset_alphas(self):
+    def reset_alphas(self, cell):
         n_ops = len(self.primitives)
         self.alpha_normal = nn.ParameterList()
         self.alpha_reduce = nn.ParameterList()
 
         for i in range(self.n_nodes):
-            # create alpha parameters over parallel operations,
-            self.alpha_normal.append(nn.Parameter(
-                1e-3 * torch.randn(i + 2, n_ops))).cuda()
-            self.alpha_reduce.append(nn.Parameter(
-                1e-3 * torch.randn(i + 2, n_ops))).cuda()
+            if cell == "normal":
+                # create alpha parameters over parallel operations,
+                self.alpha_normal.append(nn.Parameter(
+                    1e-3 * torch.randn(i + 2, n_ops))).cuda()
+            if cell == "reduce":
+                self.alpha_reduce.append(nn.Parameter(
+                    1e-3 * torch.randn(i + 2, n_ops))).cuda()
 
     def prune_alphas(self, prune_threshold=0.0, val=-10e8):
         """Set the alphas with probability below prune_threshold to a

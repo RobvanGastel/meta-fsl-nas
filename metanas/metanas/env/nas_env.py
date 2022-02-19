@@ -178,7 +178,7 @@ class NasEnv(gym.Env):
         self.meta_model.load_state_dict(copy.deepcopy(self.meta_state))
 
         # TODO
-        self.meta_model.reset_alphas()
+        self.meta_model.reset_alphas(cell=self.cell_type)
 
         self.update_states()
 
