@@ -642,8 +642,8 @@ class NasEnv(gym.Env):
                 prev_states = self.update_states()
 
                 # TODO
-                if self.do_update is False:
-                    self.do_update = update
+                # if self.do_update is False:
+                self.do_update = update
 
                     # Only "Calculate reward/do_update" for reward if
                     # in top-k
@@ -679,9 +679,9 @@ class NasEnv(gym.Env):
                 # Update the local state after increasing the alphas
                 prev_states = self.update_states()
 
-                # TODO
-                if self.do_update is False:
-                    self.do_update = update
+                # if self.do_update is False:
+                self.do_update = update
+
                     # Only "Calculate reward/do_update" for reward if
                     # in top-k or if the topk edge changed.
                     # self.do_update = edge_become_topk(
@@ -721,7 +721,6 @@ class NasEnv(gym.Env):
         # Scale reward to (min_rew, max_rew) range, [-min, max]
         reward = self.scale_postive_reward(acc)
 
-        # TODO: Extra reward based on estimations
         reward += self.acc_estimations * 0.2
 
         if self.max_acc < acc:

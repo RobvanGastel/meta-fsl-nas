@@ -904,7 +904,7 @@ def evaluate(config, meta_model, task_distribution, task_optimizer, agent):
         max_ep_len=config.env_max_ep_len,
         disable_pairwise_alphas=config.env_disable_pairwise_alphas)
 
-    for eval_epoch in range(config.eval_epochs):
+    for eval_epoch in range(1):
 
         meta_test_batch = task_distribution.sample_meta_test()
         global_progress = f"[Eval-Epoch {eval_epoch:2d}/{config.eval_epochs}]"
