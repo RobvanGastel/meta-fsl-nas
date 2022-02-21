@@ -192,7 +192,8 @@ class NasEnv(gym.Env):
         self.max_acc = 0.0
 
         # Set baseline accuracy to scale the reward
-        _, self.baseline_acc = self.compute_reward()
+        # _, self.baseline_acc = 0  # self.compute_reward()
+        self.baseline_acc = 0
 
         # Invalid action mask
         mask = self.invalid_mask[self.current_state_index]
@@ -346,7 +347,7 @@ class NasEnv(gym.Env):
     def _inverse_softmax(self, x, C):
         """Reverse calculation of the normalized alpha
         """
-        return torch.log(x) + C
+        return (torch.log(x) + C).cuda()
 
     def increase_op(self, row_idx, edge_idx, op_idx, prob=0.6):
         """Increase alpha value for the given incoming connection of a node.
@@ -910,6 +911,8 @@ class NasEnv(gym.Env):
         # Old weights are loaded, which also reverts the architecture encoding
         self.meta_model.load_state_dict(model_init)
         for (_, p1), (_, p2) in zip(self.meta_model._alphas, new_arch_params):
+            # print(self.meta_model.apply_normalizer(p1.data))
+            # print(self.meta_model.apply_normalizer(p2.data), "\n")
             p1.data = p2.data
 
         # Step 3 of Algorithm 3 - training weights after updating the
