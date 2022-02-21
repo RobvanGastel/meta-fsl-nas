@@ -631,13 +631,13 @@ class NasEnv(gym.Env):
                 prev_states = self.update_states()
 
                 # TODO
-                # if self.do_update is False:
-                self.do_update = update
+                if self.do_update is False:
+                    # self.do_update = update
 
-                # Only "Calculate reward/do_update" for reward if
-                # in top-k
-                # self.do_update = edge_become_topk(
-                #     prev_states, self.states, self.discrete_alphas, s_idx)
+                    # Only "Calculate reward/do_update" for reward if
+                    # in top-k
+                    self.do_update = edge_become_topk(
+                        prev_states, self.states, self.discrete_alphas, s_idx)
 
             # Set current state again!
             self.current_state = self.states[s_idx]
@@ -668,13 +668,13 @@ class NasEnv(gym.Env):
                 # Update the local state after increasing the alphas
                 prev_states = self.update_states()
 
-                # if self.do_update is False:
-                self.do_update = update
+                if self.do_update is False:
+                # self.do_update = update
 
                 # Only "Calculate reward/do_update" for reward if
                 # in top-k or if the topk edge changed.
-                # self.do_update = edge_become_topk(
-                #     prev_states, self.states, self.discrete_alphas, s_idx)
+                    self.do_update = edge_become_topk(
+                        prev_states, self.states, self.discrete_alphas, s_idx)
 
             # Set current state again!
             self.current_state = self.states[s_idx]
@@ -1176,7 +1176,7 @@ def edge_become_topk(prev_dict, states, alphas, s_idx):
         if (prev_topk[s_idx] < topk[s_idx]):
             return True
 
-        # TODO
+        # TODO: For discrete
         # return (prev_alphas[s_idx] < alphas[s_idx]).any()
 
     return False
