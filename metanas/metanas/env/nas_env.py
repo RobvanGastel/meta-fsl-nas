@@ -107,7 +107,10 @@ class NasEnv(gym.Env):
         # Initialize action space
         # |A| + 2*|O| + 1, +1 if termination action
         action_size = len(self.A) + 2*len(self. primitives)
+        self.action_size = action_size
         self.action_space = spaces.Discrete(action_size)
+
+        self.alpha_mask = np.zeros((action_size))
 
         self.alpha_prob = config.env_alpha_probability
 
@@ -173,6 +176,7 @@ class NasEnv(gym.Env):
 
         # Initialize the step counters
         self.step_count = 0
+        self.alpha_mask = np.zeros((self.action_size))
 
         # Reset alphas and weights of the model
         self.meta_model.load_state_dict(copy.deepcopy(self.meta_state))
@@ -501,6 +505,7 @@ class NasEnv(gym.Env):
 
         # Invalid action mask
         mask = self.invalid_mask[self.current_state_index]
+        mask += self.alpha_mask
         self.step_count += 1
 
         info_dict = {
@@ -562,6 +567,7 @@ class NasEnv(gym.Env):
                 # Compute reward after updating
                 if self.do_update:
                     self.do_update = False
+                    self.alpha_mask = np.zeros((self.action_size))
 
                     if not check_if_visited(self.encourage_edges,
                                             cur_node, next_node):
@@ -613,6 +619,10 @@ class NasEnv(gym.Env):
         # Increasing the alpha for the given operation
         if action in np.arange(len(self.A),
                                len(self.A)+len(self.primitives)):
+            
+            if self.alpha_mask[action] != 1:
+                self.alpha_mask[action] = 1
+
             # Adjust action indices to fit the operations
             action = action - len(self.A)
 
@@ -631,13 +641,13 @@ class NasEnv(gym.Env):
                 prev_states = self.update_states()
 
                 # TODO
-                if self.do_update is False:
-                    # self.do_update = update
+                # if self.do_update is False:
+                self.do_update = update
 
                     # Only "Calculate reward/do_update" for reward if
                     # in top-k
-                    self.do_update = edge_become_topk(
-                        prev_states, self.states, self.discrete_alphas, s_idx)
+                    # self.do_update = edge_become_topk(
+                    #     prev_states, self.states, self.discrete_alphas, s_idx)
 
             # Set current state again!
             self.current_state = self.states[s_idx]
@@ -651,6 +661,10 @@ class NasEnv(gym.Env):
         # Decreasing the alpha for the given operation
         if action in np.arange(len(self.A)+len(self.primitives),
                                len(self.A)+2*len(self.primitives)):
+            
+            if self.alpha_mask[action] != 1:
+                self.alpha_mask[action] = 1
+
             # Adjust action indices to fit the operations
             action = action - len(self.A) - len(self.primitives)
 
@@ -668,13 +682,13 @@ class NasEnv(gym.Env):
                 # Update the local state after increasing the alphas
                 prev_states = self.update_states()
 
-                if self.do_update is False:
-                # self.do_update = update
+                # if self.do_update is False:
+                self.do_update = update
 
                 # Only "Calculate reward/do_update" for reward if
                 # in top-k or if the topk edge changed.
-                    self.do_update = edge_become_topk(
-                        prev_states, self.states, self.discrete_alphas, s_idx)
+                    # self.do_update = edge_become_topk(
+                    #     prev_states, self.states, self.discrete_alphas, s_idx)
 
             # Set current state again!
             self.current_state = self.states[s_idx]
