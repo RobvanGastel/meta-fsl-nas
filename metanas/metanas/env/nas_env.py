@@ -106,7 +106,9 @@ class NasEnv(gym.Env):
 
         # Initialize action space
         # |A| + 2*|O| + 1, +1 if termination action
-        action_size = len(self.A) + 2*len(self. primitives)
+        action_size = len(self.A) + 2*len(self.primitives)
+        #2*len(self. primitives)
+        # Remove decrease action
         self.action_size = action_size
         self.action_space = spaces.Discrete(action_size)
 
@@ -196,8 +198,8 @@ class NasEnv(gym.Env):
         self.max_acc = 0.0
 
         # Set baseline accuracy to scale the reward
-        # _, self.baseline_acc = 0  # self.compute_reward()
-        self.baseline_acc = 0
+        _, self.baseline_acc = self.compute_reward()
+        # self.baseline_acc = 0
 
         # Invalid action mask
         mask = self.invalid_mask[self.current_state_index]
@@ -305,6 +307,7 @@ class NasEnv(gym.Env):
                         self.A[i+2],
                         edge.detach().numpy())))
 
+                # TODO, *2
                 self.invalid_mask.append(
                     np.hstack((self.A[i+2], np.ones((self.n_ops*2)))))
 
@@ -316,8 +319,9 @@ class NasEnv(gym.Env):
                         self.A[j],
                         edge.detach().numpy())))
 
+                # TODO
                 self.invalid_mask.append(
-                    np.hstack((self.A[j], np.ones((self.n_ops*2)))))
+                    np.hstack((self.A[j], np.ones((self.n_ops*2))))) #*2
 
                 s_idx += 2
 

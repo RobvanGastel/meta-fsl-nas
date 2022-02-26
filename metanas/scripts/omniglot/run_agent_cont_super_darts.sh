@@ -20,7 +20,7 @@ echo "Start run ${AGENT}, variables: epochs = ${EPOCHS}, warm up variables = ${W
 
 for SEED in ${SEEDS}
 do
-    TRAIN_DIR=/home/rob/Git/meta-fsl-nas/metanas/results/${DATASET}_n${N}_k${K}/${AGENT}/darts_env_cont_super/seed_$SEED
+    TRAIN_DIR=/home/rob/Git/meta-fsl-nas/metanas/results/${DATASET}_n${N}_k${K}/${AGENT}/darts_env_cont_super_meta_a_act_mask/seed_$SEED
 	mkdir -p $TRAIN_DIR
 
     args=(
@@ -89,7 +89,7 @@ do
         # meta-RL agent
         --agent ${AGENT} \
         # E-RL2 batch sampling
-        --agent_exploration \
+        # --agent_exploration \
         --agent_hidden_size 256 \
 
         # Use policy masking illegal actions
