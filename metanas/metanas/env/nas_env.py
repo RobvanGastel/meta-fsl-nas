@@ -550,6 +550,8 @@ class NasEnv(gym.Env):
 
             # Determine if agent is allowed to traverse the edge
             if self.A[next_node][action] > 0:
+                self.alpha_mask = np.zeros((self.action_size))
+
                 # Legal action
                 cur_node = next_node
                 next_node = action
@@ -567,7 +569,6 @@ class NasEnv(gym.Env):
                 # Compute reward after updating
                 if self.do_update:
                     self.do_update = False
-                    self.alpha_mask = np.zeros((self.action_size))
 
                     if not check_if_visited(self.encourage_edges,
                                             cur_node, next_node):
@@ -619,9 +620,8 @@ class NasEnv(gym.Env):
         # Increasing the alpha for the given operation
         if action in np.arange(len(self.A),
                                len(self.A)+len(self.primitives)):
-            
-            if self.alpha_mask[action] != 1:
-                self.alpha_mask[action] = 1
+        
+            self.alpha_mask[action] = 1
 
             # Adjust action indices to fit the operations
             action = action - len(self.A)
@@ -662,8 +662,7 @@ class NasEnv(gym.Env):
         if action in np.arange(len(self.A)+len(self.primitives),
                                len(self.A)+2*len(self.primitives)):
             
-            if self.alpha_mask[action] != 1:
-                self.alpha_mask[action] = 1
+            self.alpha_mask[action] = 1
 
             # Adjust action indices to fit the operations
             action = action - len(self.A) - len(self.primitives)
