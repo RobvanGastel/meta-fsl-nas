@@ -4,10 +4,10 @@ source /home/TUE/20184291/miniconda3/etc/profile.d/conda.sh
 source activate metanas
 
 # parameters
-EPOCHS=25
+EPOCHS=50
 EVAL_FREQ=10
 WARM_UP=0
-SEEDS=(1)
+SEEDS=(2)
 
 AGENT=ppo
 DATASET_DIR=/home/rob/Git/meta-fsl-nas/data
@@ -20,7 +20,7 @@ echo "Start run ${AGENT}, variables: epochs = ${EPOCHS}, warm up variables = ${W
 
 for SEED in ${SEEDS}
 do
-    TRAIN_DIR=/home/rob/Git/meta-fsl-nas/metanas/results/${DATASET}_n${N}_k${K}/${AGENT}/darts_env_cont_super_meta_a_act_mask/seed_$SEED
+    TRAIN_DIR=/home/rob/Git/meta-fsl-nas/metanas/results/${DATASET}_n${N}_k${K}/${AGENT}/darts_env_cont_super_meta_a_act_mask_no_erl_increase/seed_$SEED
 	mkdir -p $TRAIN_DIR
 
     args=(
@@ -35,6 +35,7 @@ do
         --workers 0 \
         --gpus 0 \
         --test_adapt_steps 1.0 \
+        --eval \
 
         --seed $SEED
         

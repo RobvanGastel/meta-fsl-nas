@@ -92,8 +92,6 @@ def meta_architecture_search(
             OmniglotFewShot,
             MiniImageNetFewShot as miniImageNetFewShot,
             TripleMNISTFewShot,
-            OmniPrintFewShot,
-            OmniPrintDomainAdaptationFewShot
         )
     else:
         raise RuntimeError("Other data loaders deprecated.")
@@ -104,24 +102,10 @@ def meta_architecture_search(
         task_distribution_class = miniImageNetFewShot
     elif config.dataset == "triplemnist":
         task_distribution_class = TripleMNISTFewShot
-    elif config.dataset == "omniprint":
-        task_distribution_class = OmniPrintFewShot
     else:
         raise RuntimeError(f"Dataset {config.dataset} is not supported.")
 
-    if config.use_domain_adaptation and config.dataset == "omniprint":
-        if config.source_domain is None and config.target_domain is None:
-            raise RuntimeError("Source and/or target domain not defined")
-
-        task_distribution = OmniPrintDomainAdaptationFewShot(
-            config, source_domain=config.source_domain,
-            target_domain=config.target_domain,
-            download=True)
-    elif config.use_domain_adaptation:
-        raise RuntimeError(
-            f"Dataset {config.dataset} is not supported.")
-    else:
-        task_distribution = task_distribution_class(
+    task_distribution = task_distribution_class(
             config, download=True)
 
     # meta model
@@ -205,7 +189,6 @@ def _init_meta_rl_agent(config, meta_model):
     # Dummy environment to set shapes and sizes
     env_normal = NasEnv(
         config, meta_model, test_phase=False, cell_type="normal",
-        reward_estimation=config.use_metad2a_estimation,
         max_ep_len=config.env_max_ep_len,
         disable_pairwise_alphas=config.env_disable_pairwise_alphas)
 
@@ -247,10 +230,6 @@ def _init_meta_rl_agent(config, meta_model):
 def meta_test_rl_optimization(
         config, task, env_normal, env_reduce, agent,
         meta_state, meta_model, meta_epoch):
-
-    # TODO
-    # meta_model.reset_alphas(cell="normal")
-    # meta_model.reset_alphas(cell="reduce")
 
     if not config.use_meta_model:
         # Only update the alphas, not weights
@@ -301,13 +280,7 @@ def meta_rl_optimization(
         config, task, env_normal, env_reduce, agent,
         meta_state, meta_model, meta_epoch, test_phase=False):
 
-    # TODO:
-    # meta_model.reset_alphas(cell="normal")
-    # meta_model.reset_alphas(cell="reduce")
-
     if not config.use_meta_model:
-        # Only update the alphas
-
         # NORMAL cell environment
         env_normal.set_task(task, meta_state, test_phase)
         agent.set_task([env_normal])
@@ -650,12 +623,10 @@ def train(
     # Environment to learn reduction and normal cell
     env_normal = NasEnv(
         config, meta_model, test_phase=False, cell_type="normal",
-        reward_estimation=config.use_metad2a_estimation,
         max_ep_len=config.env_max_ep_len,
         disable_pairwise_alphas=config.env_disable_pairwise_alphas)
     env_reduce = NasEnv(
         config, meta_model, test_phase=False, cell_type="reduce",
-        reward_estimation=config.use_metad2a_estimation,
         max_ep_len=config.env_max_ep_len,
         disable_pairwise_alphas=config.env_disable_pairwise_alphas)
 
@@ -902,17 +873,15 @@ def evaluate(config, meta_model, task_distribution, task_optimizer, agent):
     # Environment to learn reduction and normal cell
     env_normal = NasEnv(
         config, meta_model, test_phase=True, cell_type="normal",
-        reward_estimation=config.use_metad2a_estimation,
         max_ep_len=config.env_max_ep_len,
         disable_pairwise_alphas=config.env_disable_pairwise_alphas)
 
     env_reduce = NasEnv(
         config, meta_model, test_phase=True, cell_type="reduce",
-        reward_estimation=config.use_metad2a_estimation,
         max_ep_len=config.env_max_ep_len,
         disable_pairwise_alphas=config.env_disable_pairwise_alphas)
 
-    for eval_epoch in range(1):
+    for eval_epoch in range(config.eval_epochs):
 
         meta_test_batch = task_distribution.sample_meta_test()
         global_progress = f"[Eval-Epoch {eval_epoch:2d}/{config.eval_epochs}]"
@@ -1008,29 +977,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--dataset", default="omniglot",
-        help="omniglot / miniimagenet / triplemnist / omniprint")
-
-    parser.add_argument(
-        "--use_domain_adaptation",
-        action="store_true",
-        help="Perform domain adaptation experiments"
-    )
-
-    parser.add_argument(
-        "--print_split",
-        default="meta1",
-        help="For the specific omniprint split"
-    )
-
-    parser.add_argument(
-        "--source_domain",
-        default=None, help="meta1 / meta2 / meta3 / meta4 / meta5"
-    )
-
-    parser.add_argument(
-        "--target_domain",
-        default=None, help="meta1 / meta2 / meta3 / meta4 / meta5"
-    )
+        help="omniglot / miniimagenet / triplemnist")
 
     parser.add_argument(
         "--use_vinyals_split",
@@ -1318,11 +1265,6 @@ if __name__ == "__main__":
         "during final evaluation.",
     )  # deprecated
 
-    parser.add_argument(
-        "--use_validation_set", action="store_true",
-        help="Seperate a small part of the training set for validation"
-    )
-
     # Meta-RL agent settings
     parser.add_argument("--agent", default="random",
                         help="random / ppo")
@@ -1363,29 +1305,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--env_disable_pairwise_alphas",
                         action="store_true")
-
-    # MetaD2A reward estimation settings
-    parser.add_argument(
-        "--rew_model_path", default='/home/rob/Git/meta-fsl-nas/')
-    parser.add_argument(
-        "--rew_data_path",
-        default='/home/rob/Git/meta-fsl-nas/')
-
-    parser.add_argument(
-        "--use_metad2a_estimation",
-        action="store_true",
-        help="Use meta_predictor for the env reward estimation")
-
     args = parser.parse_args()
-
-    # Fixed MetaD2A variables
-    # num_samples in few-shot setting, n*k
-    args.num_samples = 20
-    # the graph data used, nas-bench-201
-    args.graph_data_name = 'nasbench201'
-    args.nvt = 7
-    args.hs = 512
-    args.nz = 56
 
     args.path = os.path.join(
         args.path, ""

@@ -1,11 +1,12 @@
 import numpy as np
-
 from gym import spaces
 
 from metanas.env.krazy_world import KrazyGridWorld
 
 
 class KrazyWorld:
+    """KrazyWorld Gym wrapper
+    """
     metadata = {'render.modes': ['human']}
 
     def __init__(self, seed, task_seed=None, max_ep_len=100,

@@ -17,7 +17,6 @@ from metanas.utils import utils
 
 import metanas.utils.genotypes as gt
 from metanas.task_optimizer.darts import Architect
-from metanas.meta_predictor.meta_predictor import MetaPredictor
 
 
 """Wrapper for the RL agent to interact with the meta-model in the outer-loop
@@ -29,7 +28,7 @@ class NasEnv(gym.Env):
     metadata = {'render.modes': ['human']}
 
     def __init__(self, config, meta_model, test_phase=False,
-                 cell_type="normal", reward_estimation=False,
+                 cell_type="normal",
                  max_ep_len=200, disable_pairwise_alphas=False,
                  test_env=None):
         super().__init__()
@@ -54,15 +53,7 @@ class NasEnv(gym.Env):
         self.max_acc = 0.0
 
         # Task acuracy estimator
-        self.reward_estimation = reward_estimation
         self.max_task_train_steps = config.darts_estimation_steps
-        if self.reward_estimation:
-            self.meta_predictor = MetaPredictor(config)
-
-            # remove last fully-connected layer
-            model = models.resnet18(pretrained=True).eval().to(config.device)
-            self.feature_extractor = torch.nn.Sequential(
-                *list(model.children())[:-1])
         else:
             # DARTS estimation of the network
             self.task_train_steps = 0
@@ -105,8 +96,9 @@ class NasEnv(gym.Env):
         self.A_up = np.triu(self.A)
 
         # Initialize action space
+        # TODO
         # |A| + 2*|O| + 1, +1 if termination action
-        action_size = len(self.A) + 2*len(self.primitives)
+        action_size = len(self.A) + len(self.primitives)
         #2*len(self. primitives)
         # Remove decrease action
         self.action_size = action_size
@@ -185,8 +177,7 @@ class NasEnv(gym.Env):
 
         self.update_states()
 
-        if not self.reward_estimation:
-            self._init_darts_training()
+        self._init_darts_training()
 
         # Reset tracking statistics
         self.init_tracking_vars()
@@ -309,7 +300,7 @@ class NasEnv(gym.Env):
 
                 # TODO, *2
                 self.invalid_mask.append(
-                    np.hstack((self.A[i+2], np.ones((self.n_ops*2)))))
+                    np.hstack((self.A[i+2], np.ones((self.n_ops)))))
 
                 self.states.append(
                     np.concatenate((
@@ -321,7 +312,7 @@ class NasEnv(gym.Env):
 
                 # TODO
                 self.invalid_mask.append(
-                    np.hstack((self.A[j], np.ones((self.n_ops*2))))) #*2
+                    np.hstack((self.A[j], np.ones((self.n_ops))))) #*2
 
                 s_idx += 2
 
@@ -712,21 +703,13 @@ class NasEnv(gym.Env):
             reward = self.scale_reward(acc)
             return reward, acc
 
-        if self.reward_estimation:
-            acc = self._meta_predictor_estimation(self.current_task)
+        if self.config.update_weights_and_alphas:
+            acc = self._darts_weight_alpha_estimation(self.current_task)
         else:
-            if self.config.update_weights_and_alphas and \
-                    not self.config.use_tse_darts:
-                acc = self._darts_weight_alpha_estimation(self.current_task)
-            elif self.config.use_tse_darts:
-                acc = self._tse_darts_weight_alpha_estimation(
-                    self.current_task)
-            else:
-                acc = self._darts_weight_estimation(self.current_task)
+            acc = self._darts_weight_estimation(self.current_task)
 
         # Scale reward to (min_rew, max_rew) range, [-min, max]
-        reward = self.scale_postive_reward(acc)
-
+        reward = self.scale_postive(acc)
         reward += self.acc_estimations * 0.2
 
         if self.max_acc < acc:
@@ -734,40 +717,7 @@ class NasEnv(gym.Env):
 
         return reward, acc
 
-    def scale_reward(self, accuracy):
-        """
-        Map the accuracy of the network to [min_rew, max_rew]
-        for the environment.
-
-        Mapping the accuracy in [s1, s2] to [b1, b2]
-
-        for s in [s1, s2] to obtain the reward we compute
-        reward = b1 + ((s-a1)*(b2-b1)) / (a2-a1)
-        """
-        # Map accuracies greater than the baseline to
-        # [0, 1]
-        reward = 0.0
-
-        # Else, the reward is 0
-        if self.baseline_acc == accuracy:
-            return 0.0
-
-        if self.baseline_acc <= accuracy:
-            a1, a2 = self.baseline_acc, 1.0
-            b1, b2 = 0.0, self.max_rew
-
-            reward = b1 + ((accuracy-a1)*(b2-b1)) / (a2-a1)
-
-        # Map accuracies smaller than the baseline to
-        # [-1, 0]
-        elif self.baseline_acc >= accuracy:
-            a1, a2 = 0.0, self.baseline_acc
-            b1, b2 = self.min_rew, 0.0
-
-            reward = b1 + ((accuracy-a1)*(b2-b1)) / (a2-a1)
-        return reward
-
-    def scale_postive_reward(self, accuracy):
+    def scale_postive(self, accuracy):
         reward = 0.0
 
         # Map accuracies smaller than the baseline to
@@ -883,84 +833,6 @@ class NasEnv(gym.Env):
 
         return np.mean(accs)
 
-    def _tse_darts_weight_alpha_estimation(self, task):
-        self.meta_model.train()
-
-        # Exponential decay in dropout rate
-        if self.config.dropout_skip_connections and not \
-                self.test_phase:
-            dropout_rate = self.dropout_stage * \
-                np.exp(-self.task_train_steps * self.scale_factor)
-            self.meta_model.drop_out_skip_connections(dropout_rate)
-
-        # Take w step scheduler step
-        if self.w_task_lr_scheduler is not None:
-            self.w_task_lr_scheduler.step()
-
-        if self.a_task_lr_scheduler is not None:
-            self.a_task_lr_scheduler.step()
-
-        # for unrolling_step in range(self.config.tse_steps):
-        self.meta_model.zero_grad()
-        model_init = copy.deepcopy(self.meta_model.state_dict())
-
-        for step, (train_X, train_y) in enumerate(task.train_loader):
-            train_X, train_y = train_X.to(
-                self.config.device), train_y.to(self.config.device)
-
-            # Step 1 of Algorithm 3 - collect TSE gradient
-            base_loss = self.meta_model.loss(train_X, train_y)
-            base_loss.backward()
-
-            self.w_optim.step()  # Train the weights during unrolling as normal,
-            # but the architecture gradients are not zeroed during the unrolling
-            self.w_optim.zero_grad()
-
-        # Step 2 of Algorithm 3 - update the architecture encoding using
-        # accumulated gradients
-        self.a_optim.step()
-        self.a_optim.zero_grad()  # Reset to get ready for new unrolling
-        self.w_optim.zero_grad()
-
-        # Temporary backup for new architecture encoding
-        new_arch_params = copy.deepcopy(self.meta_model._alphas)
-
-        # Old weights are loaded, which also reverts the architecture encoding
-        self.meta_model.load_state_dict(model_init)
-        for (_, p1), (_, p2) in zip(self.meta_model._alphas, new_arch_params):
-            # print(self.meta_model.apply_normalizer(p1.data))
-            # print(self.meta_model.apply_normalizer(p2.data), "\n")
-            p1.data = p2.data
-
-        # Step 3 of Algorithm 3 - training weights after updating the
-        # architecture encoding
-        for step, (train_X, train_y) in enumerate(task.train_loader):
-            train_X, train_y = train_X.to(
-                self.config.device), train_y.to(self.config.device)
-            base_loss = self.meta_model.loss(train_X, train_y)
-            base_loss.backward()
-            self.w_optim.step()
-
-            self.w_optim.zero_grad()
-            self.a_optim.zero_grad()
-
-        # Step increment
-        self.task_train_steps += 1
-
-        # Obtain accuracy with gradient step
-        accs = []
-        for step, (val_X, val_y) in enumerate(task.valid_loader):
-            val_X, val_y = val_X.to(
-                self.config.device), val_y.to(self.config.device)
-            # TODO
-            logits = self.meta_model(
-                val_X,  # sparsify_input_alphas=True,
-                disable_pairwise_alphas=self.disable_pairwise_alphas)
-            prec1, _ = utils.accuracy(logits, val_y, topk=(1, 5))
-            accs.append(prec1.item())
-
-        return np.mean(accs)
-
     def _darts_weight_estimation(self, task):
         """Train network with one step gradient descent on the training set
         and calculate the accuracy of the test set.
@@ -1018,149 +890,6 @@ class NasEnv(gym.Env):
             accs.append(prec1.item())
         return np.mean(accs)
 
-    def _meta_predictor_estimation(self, task):
-        # Encode graph and dataset
-        graph = self._meta_predictor_graph_preprocess()
-        dataset = self._meta_predictor_dataset_preprocess(task)
-
-        # Evaluate on the MetaD2A predictor
-        y_pred = self.meta_predictor.evaluate_architecture(
-            dataset, graph
-        )
-
-        y_pred = y_pred.item()
-        return y_pred
-
-    def _meta_predictor_graph_preprocess(self):
-        geno = parse(self.normalized_alphas, k=2,
-                     primitives=gt.PRIMITIVES_NAS_BENCH_201)
-
-        # Convert genotype to graph
-        edges = []
-
-        # All networks have transformed edge => node,
-        # node => edge the adjacency matrix is,
-        connections = [[1],
-                       [1, 0],
-                       [0, 1, 0],
-                       [1, 0, 0, 0],
-                       [0, 1, 0, 0, 0],
-                       [0, 0, 1, 1, 0, 0],
-                       [0, 0, 0, 0, 1, 1, 1]]
-
-        start_node = [0]
-        edges.append(start_node)
-        index = 0
-
-        for node in geno:
-            for op, _ in node:
-                # plus two, to not confuse the
-                # start node and end node
-                op = [self.primitives.index(op) + 2]
-                op.extend(connections[index])
-                edges.append(op)
-                index += 1
-
-        stop_node = [1]
-        stop_node.extend(connections[-1])
-        edges.append(stop_node)
-
-        graph, _ = decode_metad2a_to_igraph(edges)
-        return graph
-
-    def _meta_predictor_dataset_preprocess(self, task):
-
-        # Get num_samples, n_train * k
-        # Testing dataset does not have enough samples
-        train_X, _ = next(iter(task.train_loader))
-
-        # Shape the image as (3, 32, 32)
-        train_X = train_X.to(self.config.device)
-        dataset = F.interpolate(train_X, size=(32, 32))
-        dataset = fill_up_dataset(dataset, self.config.num_samples)
-
-        assert dataset.shape[0] == self.config.num_samples, \
-            "Number of samples should equal training of meta_predictor " \
-            f"{dataset.shape[0]}, {self.config.num_samples}"
-
-        # Make sure there are 3 channels
-        if self.config.dataset == "omniglot" or \
-                self.config.dataset == "triplemnist":
-            dataset = dataset.repeat(1, 3, 1, 1)
-
-        # Normalize the features
-        if self.config.dataset == "omniglot":
-            mean = torch.tensor([0.9221]).to(self.config.device)
-            std = torch.tensor([0.1257]).to(self.config.device)
-
-        elif self.config.dataset == "triplemnist":
-            mean = torch.tensor([0.0439]).to(self.config.device)
-            std = torch.tensor([0.1879]).to(self.config.device)
-
-        elif self.config.dataset == "miniimagenet":
-            mean = torch.tensor([0.4416]).to(self.config.device)
-            std = torch.tensor([0.2328]).to(self.config.device)
-
-        elif self.config.dataset == "omniprint" and self.config.print_split == "meta1":
-            mean = torch.tensor([0.8693]).to(self.config.device)
-            std = torch.tensor([0.2104]).to(self.config.device)
-
-        elif self.config.dataset == "omniprint" and self.config.print_split == "meta2":
-            mean = torch.tensor([0.8481]).to(self.config.device)
-            std = torch.tensor([0.2308]).to(self.config.device)
-
-        elif self.config.dataset == "omniprint" and self.config.print_split == "meta3":
-            mean = torch.tensor([0.8670]).to(self.config.device)
-            std = torch.tensor([0.2171]).to(self.config.device)
-
-        elif self.config.dataset == "omniprint" and self.config.print_split == "meta4":
-            mean = torch.tensor([0.6226]).to(self.config.device)
-            std = torch.tensor([0.0818]).to(self.config.device)
-
-        elif self.config.dataset == "omniprint" and self.config.print_split == "meta5":
-            mean = torch.tensor([0.5685]).to(self.config.device)
-            std = torch.tensor([0.1241]).to(self.config.device)
-
-        else:
-            raise RuntimeError(
-                f"Dataset {self.config.dataset} is not supported.")
-        dataset = dataset.sub_(mean).div_(std)
-
-        # Extracts features by ResNet18
-        return self.feature_extractor(dataset)
-
-
-def fill_up_dataset(dataset, required_size):
-    ds_size = dataset.shape[0]
-    ds = copy.deepcopy(dataset)
-
-    # In case only downsizing is required
-    if ds_size >= required_size:
-        return dataset[:required_size]
-
-    while ds.size(0) < required_size:
-        perm = torch.randperm(len(ds))[:1].item()
-        ds = torch.cat((ds, ds[perm].unsqueeze(dim=0)))
-    return ds
-
-
-def decode_metad2a_to_igraph(row):
-    if isinstance(row, str):
-        row = eval(row)
-    n = len(row)
-
-    g = igraph.Graph(directed=True)
-    g.add_vertices(n)
-
-    for i, node in enumerate(row):
-        g.vs[i]['type'] = node[0]
-
-        if i < (n - 2) and i > 0:
-            g.add_edge(i, i + 1)  # always connect from last node
-        for j, edge in enumerate(node[1:]):
-            if edge == 1:
-                g.add_edge(j, i)
-    return g, n
 
 
 def parse(alpha, k, primitives=gt.PRIMITIVES_NAS_BENCH_201):

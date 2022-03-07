@@ -4,14 +4,12 @@ import numpy as np
 
 from metanas.env.krazy_world_env import KrazyWorld
 from metanas.meta_optimizer.agents.PPO.rl2_ppo import PPO
-from metanas.meta_optimizer.agents.SAC.rl2_sac import SAC
-from metanas.meta_optimizer.agents.DQN.rl2_dqn import DQN
 from metanas.meta_optimizer.agents.utils.run_utils import setup_logger_kwargs
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--agent", type=str, default="PPO", help="PPO/SAC/DQN")
+    parser.add_argument("--agent", type=str, default="PPO", help="PPO")
     parser.add_argument("--name", type=str, default="", help="experiment name")
     parser.add_argument("--seed", type=int, default=42, help="random seed")
     parser.add_argument("--hidden_size", type=int, default=256)
@@ -45,28 +43,15 @@ if __name__ == "__main__":
                     hidden_size=args.hidden_size,
                     exploration_sampling=args.exploration_sampling,
                     logger_kwargs=logger_kwargs)
-    if args.agent == "SAC":
-        ac_kwargs = dict(hidden_size=[args.hidden_size]*2)
-        agent = SAC(None, env, ac_kwargs=ac_kwargs,
-                    epochs=args.epochs,
-                    reset_buffer=args.reset_buffer,
-                    hidden_size=args.hidden_size,
-                    exploration_sampling=args.exploration_sampling,
-                    logger_kwargs=logger_kwargs)
-    if args.agent == "DQN":
-        qnet_kwargs = dict(hidden_size=args.hidden_size)
-        agent = DQN(None, env, qnet_kwargs=qnet_kwargs,
-                    epochs=args.epochs,
-                    logger_kwargs=logger_kwargs)
 
     if args.use_meta_learning:
         for i in range(args.iterations):
             env = np.random.choice(envs, 1)[0]
             agent.train_agent(env)
 
-            # if i % args.test_trial == 0:
-            #     test_env = np.random.choice(test_envs, 1)[0]
-            #     agent.test_agent(test_env)
+            if i % args.test_trial == 0:
+                test_env = np.random.choice(test_envs, 1)[0]
+                agent.test_agent(test_env)
     else:
         agent.train_agent(env)
 
