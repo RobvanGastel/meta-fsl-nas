@@ -192,8 +192,8 @@ class NasEnv(gym.Env):
         self.max_acc = 0.0
 
         # Set baseline accuracy to scale the reward
-        # _, self.baseline_acc = 0  # self.compute_reward()
-        self.baseline_acc = 0
+        _, self.baseline_acc = self.compute_reward()
+        # self.baseline_acc = 0
 
         # Invalid action mask
         mask = self.invalid_mask[self.current_state_index]
@@ -668,11 +668,12 @@ class NasEnv(gym.Env):
                 # Update the local state after increasing the alphas
                 prev_states = self.update_states()
 
+                # TODO
                 if self.do_update is False:
-                # self.do_update = update
+                    # self.do_update = update
 
-                # Only "Calculate reward/do_update" for reward if
-                # in top-k or if the topk edge changed.
+                    # Only "Calculate reward/do_update" for reward if
+                    # in top-k or if the topk edge changed.
                     self.do_update = edge_become_topk(
                         prev_states, self.states, self.discrete_alphas, s_idx)
 
@@ -698,12 +699,11 @@ class NasEnv(gym.Env):
         if self.reward_estimation:
             acc = self._meta_predictor_estimation(self.current_task)
         else:
-            if self.config.update_weights_and_alphas and \
-                    not self.config.use_tse_darts:
+            if self.config.update_weights_and_alphas:
                 acc = self._darts_weight_alpha_estimation(self.current_task)
-            elif self.config.use_tse_darts:
-                acc = self._tse_darts_weight_alpha_estimation(
-                    self.current_task)
+            # elif self.config.use_tse_darts:
+            #     acc = self._tse_darts_weight_alpha_estimation(
+            #         self.current_task)
             else:
                 acc = self._darts_weight_estimation(self.current_task)
 

@@ -163,7 +163,7 @@ def set_rl_hyperparameters(config):
     config.encourage_increase = 1.0
     config.encourage_decrease = 0.0
 
-    config.env_alpha_probability = 0.10
+    config.env_alpha_probability = 0.90
     config.env_max_ep_len = 200
 
     # Agent configuration

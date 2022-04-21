@@ -249,8 +249,8 @@ def meta_test_rl_optimization(
         meta_state, meta_model, meta_epoch):
 
     # TODO
-    # meta_model.reset_alphas(cell="normal")
-    # meta_model.reset_alphas(cell="reduce")
+    meta_model.reset_alphas(cell="normal")
+    meta_model.reset_alphas(cell="reduce")
 
     if not config.use_meta_model:
         # Only update the alphas, not weights
@@ -302,8 +302,8 @@ def meta_rl_optimization(
         meta_state, meta_model, meta_epoch, test_phase=False):
 
     # TODO:
-    # meta_model.reset_alphas(cell="normal")
-    # meta_model.reset_alphas(cell="reduce")
+    meta_model.reset_alphas(cell="normal")
+    meta_model.reset_alphas(cell="reduce")
 
     if not config.use_meta_model:
         # Only update the alphas
@@ -712,9 +712,10 @@ def train(
         train_test_loss.append(config.losses_logger.avg)
         train_test_accu.append(config.top1_logger.avg)
 
-        d = shelve.open(config.action_path)
-        d.update(agent.action_dict)
-        d.close()
+        if config.agent == "ppo":
+            d = shelve.open(config.action_path)
+            d.update(agent.action_dict)
+            d.close()
 
         # do a meta update
         meta_optimizer.step(task_infos)

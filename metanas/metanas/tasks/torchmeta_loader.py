@@ -55,43 +55,43 @@ def sample_meta_batch(
     meta_train_batch = list()
     for task_idx in range(num_tasks):
 
-        if validation_set:
-            # todo 0.8 training set, 0.2 validation set
-            task_train_sampler = RandomSampler(
-                range(int(15 * 5 * 0.8)),
-                replacement=True,
-                num_samples=15)
+        # if validation_set:
+        #     # todo 0.8 training set, 0.2 validation set
+        #     task_train_sampler = RandomSampler(
+        #         range(int(15 * 5 * 0.8)),
+        #         replacement=True,
+        #         num_samples=15)
 
-            train_idx, valid_idx = train_test_split(
-                np.arange(len(train_batch_y[task_idx].numpy())),
-                test_size=0.2, random_state=seed, shuffle=True,
-                stratify=train_batch_y[task_idx].numpy())
+        #     train_idx, valid_idx = train_test_split(
+        #         np.arange(len(train_batch_y[task_idx].numpy())),
+        #         test_size=0.2, random_state=seed, shuffle=True,
+        #         stratify=train_batch_y[task_idx].numpy())
 
-            # Train loader
-            dset_train = TensorDataset(
-                train_batch_x[task_idx][train_idx],
-                train_batch_y[task_idx][train_idx])
+        #     # Train loader
+        #     dset_train = TensorDataset(
+        #         train_batch_x[task_idx][train_idx],
+        #         train_batch_y[task_idx][train_idx])
 
-            train_loader = DataLoader(
-                dset_train, batch_size=15,  # task_batch_size,
-                sampler=task_train_sampler)
+        #     train_loader = DataLoader(
+        #         dset_train, batch_size=15,  # task_batch_size,
+        #         sampler=task_train_sampler)
 
-            # Validation loader
-            dset_val = TensorDataset(
-                train_batch_x[task_idx][valid_idx],
-                train_batch_y[task_idx][valid_idx])
+        #     # Validation loader
+        #     dset_val = TensorDataset(
+        #         train_batch_x[task_idx][valid_idx],
+        #         train_batch_y[task_idx][valid_idx])
 
-            val_loader = DataLoader(
-                dset_val, batch_size=5)
-        else:
-            # Train loader
-            dset_train = TensorDataset(
-                train_batch_x[task_idx], train_batch_y[task_idx])
-            train_loader = DataLoader(
-                dset_train, batch_size=task_batch_size,
-                sampler=task_train_sampler)
+        #     val_loader = DataLoader(
+        #         dset_val, batch_size=5)
+        # else:
+        # Train loader
+        dset_train = TensorDataset(
+            train_batch_x[task_idx], train_batch_y[task_idx])
+        train_loader = DataLoader(
+            dset_train, batch_size=task_batch_size,
+            sampler=task_train_sampler)
 
-            val_loader = train_loader
+        val_loader = train_loader
 
         # Test loader
         dset_test = TensorDataset(

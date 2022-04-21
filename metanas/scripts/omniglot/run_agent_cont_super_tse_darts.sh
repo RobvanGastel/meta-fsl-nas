@@ -4,7 +4,7 @@ source /home/TUE/20184291/miniconda3/etc/profile.d/conda.sh
 source activate metanas
 
 # parameters
-EPOCHS=30
+EPOCHS=50
 EVAL_FREQ=10
 WARM_UP=0
 SEEDS=(1)
@@ -20,7 +20,7 @@ echo "Start run ${AGENT}, variables: epochs = ${EPOCHS}, warm up variables = ${W
 
 for SEED in ${SEEDS}
 do
-    TRAIN_DIR=/home/rob/Git/meta-fsl-nas/metanas/results/${DATASET}_n${N}_k${K}/${AGENT}/darts_env_cont_super_unif_alpha/seed_$SEED
+    TRAIN_DIR=/home/rob/Git/meta-fsl-nas/metanas/results/${DATASET}_n${N}_k${K}/${AGENT}/darts_env_cont_super_unif_a_high_prob_topk_2/seed_$SEED
 	mkdir -p $TRAIN_DIR
 
     args=(
@@ -30,13 +30,15 @@ do
         --path ${TRAIN_DIR} \
         --data_path ${DATASET_DIR} \
         --dataset $DATASET
-        --hp_setting 'og_tse_metanas' \
+        --hp_setting 'og_metanas' \
         --use_hp_setting 1 \
         --workers 0 \
         --gpus 0 \
         --test_adapt_steps 1.0 \
 
-        --seed $SEED
+
+        # --model_path '/home/rob/Git/meta-fsl-nas/metanas/results/omniglot_n1_k20/ppo/darts_env_cont_super_meta_a/seed_1/meta_state' \
+        --seed $SEED \
         
         # few shot params
         # examples per class
@@ -80,17 +82,20 @@ do
         --env_update_weights_and_alphas \
         --env_disable_pairwise_alphas \
 
-        # TSE darts
-        --use_tse_darts \
+        # --start_epoch 50 \
+        # --agent_model '/home/rob/Git/meta-fsl-nas/metanas/results/omniglot_n1_k20/ppo/darts_env_cont_super_meta_a/seed_1/_s1/pyt_save/model50.pt' \
+        # --agent_model_vars '/home/rob/Git/meta-fsl-nas/metanas/results/omniglot_n1_k20/ppo/darts_env_cont_super_meta_a/seed_1/_s1/vars50.pkl' \
+        # TSE dart
+        # --use_tse_darts \
 
         # Custom DARTS adjustments
-        --dropout_skip_connections \
+        # --dropout_skip_connections \
         # Default M=2,
-        --use_limit_skip_connection \
+        # --use_limit_skip_connection \
         
         # sharpDARTS
-        --darts_regularization max_w \
-        --use_cosine_power_annealing \
+        # --darts_regularization max_w \
+        # --use_cosine_power_annealing \
 
 
         # Environment

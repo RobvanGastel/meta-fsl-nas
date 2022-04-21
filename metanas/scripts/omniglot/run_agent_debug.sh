@@ -9,7 +9,7 @@ WARM_UP=0
 SEEDS=(2)
 
 DATASET=omniglot
-N=5
+N=1
 K=5
 DATASET_DIR=/home/rob/Git/meta-fsl-nas/data
 EVAL_FREQ=1
