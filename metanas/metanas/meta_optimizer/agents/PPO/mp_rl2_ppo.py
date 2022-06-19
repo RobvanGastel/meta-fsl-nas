@@ -58,8 +58,6 @@ class PPO(RL_agent):
         self.steps_per_worker = steps_per_worker
 
         act_dim = envs[0].action_space.n
-
-        print("Act dim,", act_dim)
         obs_dim = envs[0].observation_space.shape
 
         self.obs = np.zeros((self.n_workers,) + obs_dim, dtype=np.float32)

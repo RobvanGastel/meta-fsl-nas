@@ -74,12 +74,19 @@ class Darts:
 
         log_alphas = False
 
+        # P-DARTS stages
+        if self.config.use_search_space_approximation or \
+                self.config.use_search_space_regularization:
+            stages = self.config.architecture_stages
+        else:
+            stages = 1.0
+
         if test_phase:
             top1_logger = self.config.top1_logger_test
             losses_logger = self.config.losses_logger_test
             train_steps = self.config.test_task_train_steps
             arch_adap_steps = int(
-                train_steps * self.config.test_adapt_steps)
+                train_steps * self.config.test_adapt_steps * stages)
 
             if alpha_logger is not None:
                 log_alphas = True
@@ -88,7 +95,7 @@ class Darts:
             top1_logger = self.config.top1_logger
             losses_logger = self.config.losses_logger
             train_steps = self.config.task_train_steps
-            arch_adap_steps = train_steps
+            arch_adap_steps = train_steps * stages
 
         lr = self.config.w_lr
 
@@ -98,7 +105,7 @@ class Darts:
                 group["lr"] = self.config.w_lr
 
             w_task_lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-                self.w_optim, train_steps, eta_min=0.0
+                self.w_optim, train_steps * stages, eta_min=0.0
             )
         else:
             w_task_lr_scheduler = None
@@ -130,68 +137,197 @@ class Darts:
                 self.model.drop_path_prob(self.config.drop_path_prob)
 
         # Number of ops to preserve
+        # TODO
         dropout_stage = self.config.dropout_op
         scale_factor = self.config.dropout_scale_factor
 
-        for train_step in range(train_steps):
-            warm_up = (
-                epoch < self.warm_up_epochs
-            )  # if epoch < warm_up_epochs, do warm up
+        if self.config.use_search_space_approximation or \
+                self.config.use_search_space_regularization:
+            
+            # P-DARTS
+            # addition of staging (G_k) for Search Space Approximation and
+            # Regularization.
+            scale_factor = self.config.dropout_scale_factor
 
-            # Set the dropout rate for skip-connections,
-            if self.config.dropout_skip_connections and not \
-                    test_phase:  # and not warm_up:
-                # Exponential decay in dropout rate
-                dropout_rate = dropout_stage * \
-                    np.exp(-train_step * scale_factor)
-                self.model.drop_out_skip_connections(dropout_rate)
+            # For softmax temperature
+            global_train_steps = 0
+            for current_stage in range(self.config.architecture_stages):
 
-            # tracked based on the global steps not the stage training
-            # steps
-            if (
-                train_step >= arch_adap_steps
-            ):  # no architecture adap after arch_adap_steps steps
-                warm_up = 1
+                # Number of ops to preserve
+                n_ops = len(self.primitives) - \
+                    self.config.drop_number_operations[current_stage]
+                dropout_stage = self.config.dropout_ops[current_stage]
 
-            if w_task_lr_scheduler is not None:
-                w_task_lr_scheduler.step()
+                if current_stage != 0:
+                    # We increase the depth of the super-network by stacking
+                    # more cells, i.e., L_k > L_k−1
+                    if self.config.use_search_space_approximation and \
+                            self.config.use_reinitialize_model:
+                        self.model.reinit_search_model()
+            
+                for train_step in range(train_steps):
+                    warm_up = (
+                        epoch < self.warm_up_epochs
+                    )  # if epoch < warm_up_epochs, do warm up
 
-            if a_task_lr_scheduler is not None:
-                a_task_lr_scheduler.step()
+                    # Set the dropout rate for skip-connections,
+                    if self.config.dropout_skip_connections and not \
+                            test_phase:  # and not warm_up:
+                        # Exponential decay in dropout rate
+                        dropout_rate = dropout_stage * \
+                            np.exp(-train_step * scale_factor)
+                        self.model.drop_out_skip_connections(dropout_rate)
 
-            if self.config.use_tse_darts:
-                tse_train(
-                    task,
-                    self.model,
-                    self.architect,
-                    self.w_optim,
-                    self.a_optim,
-                    lr,
-                    global_progress,
-                    self.config,
-                    warm_up,
-                )
-            else:
-                train(
-                    task,
-                    self.model,
-                    self.architect,
-                    self.w_optim,
-                    self.a_optim,
-                    lr,
-                    global_progress,
-                    self.config,
-                    warm_up,
-                )
+                    # tracked based on the global steps not the stage training
+                    # steps
+                    if (
+                        train_step >= arch_adap_steps
+                    ):  # no architecture adap after arch_adap_steps steps
+                        warm_up = 1
 
-            if (
-                model_has_normalizer
-                and train_step < (arch_adap_steps - 1)
-                and not warm_up
-            ):  # check if not warm_up is correct
-                self.model.normalizer["params"]["curr_step"] += 1
-                self.architect.v_net.normalizer["params"]["curr_step"] += 1
+                    if w_task_lr_scheduler is not None:
+                        w_task_lr_scheduler.step()
 
+                    if a_task_lr_scheduler is not None:
+                        a_task_lr_scheduler.step()
+
+                    if self.config.use_tse_darts:
+                        tse_train(
+                            task,
+                            self.model,
+                            self.architect,
+                            self.w_optim,
+                            self.a_optim,
+                            lr,
+                            global_progress,
+                            self.config,
+                            warm_up,
+                        )
+                    else:
+                        train(
+                            task,
+                            self.model,
+                            self.architect,
+                            self.w_optim,
+                            self.a_optim,
+                            lr,
+                            global_progress,
+                            self.config,
+                            warm_up,
+                        )
+
+                    if (
+                        model_has_normalizer
+                        and global_train_steps < (arch_adap_steps - 1)
+                        and not warm_up
+                    ):  # todo check if not warm_up is correct
+                        self.model.normalizer["params"]["curr_step"] += 1
+                        self.architect.v_net.normalizer["params"]["curr_step"] += 1
+
+                    global_train_steps += 1
+
+                if not warm_up:
+                    # We reduce the operation space of O_k candidate operations
+                    # at the end of each stage, i.e. |O^k_(i,j)| = O_k > O_k-1
+                    if current_stage+1 != self.config.architecture_stages \
+                            and self.config.use_search_space_approximation:
+
+                        epsilon = 0.0001
+                        with torch.no_grad():
+
+                            for normal, reduce in zip(self.model.alpha_normal,
+                                                      self.model.alpha_reduce):
+                                _, indices = torch.topk(normal[:, :], n_ops)
+                                _, indices = torch.topk(reduce[:, :], n_ops)
+
+                                mask = torch.zeros(len(normal), len(
+                                    self.primitives)).cuda()
+                                normal.data = mask.scatter_(
+                                    1, indices, 1.) * normal
+
+                                # Set values not to zero, but
+                                # min(normal) - epsilon
+                                # to prevent it from being picked
+                                normal.data[normal.data == 0] = torch.min(
+                                    normal) - epsilon
+
+                                mask = torch.zeros(len(reduce), len(
+                                    self.primitives)).cuda()
+                                reduce.data = mask.scatter_(
+                                    1, indices, 1.) * reduce
+
+                                # Set values not to zero, but
+                                # min(reduce) - epsilon
+                                # to prevent it from being picked
+                                reduce.data[reduce.data == 0] = torch.min(
+                                    reduce) - epsilon
+
+        else:
+            # Number of ops to preserve
+            dropout_stage = self.config.dropout_op
+            scale_factor = self.config.dropout_scale_factor
+
+            for train_step in range(train_steps):
+                warm_up = (
+                    epoch < self.warm_up_epochs
+                )  # if epoch < warm_up_epochs, do warm up
+
+                # Set the dropout rate for skip-connections,
+                # TODO: Test with not warm_up commented
+                if self.config.dropout_skip_connections and not \
+                        test_phase:  # and not warm_up:
+                    # Exponential decay in dropout rate
+                    dropout_rate = dropout_stage * \
+                        np.exp(-train_step * scale_factor)
+                    self.model.drop_out_skip_connections(dropout_rate)
+
+                # tracked based on the global steps not the stage training
+                # steps
+                if (
+                    train_step >= arch_adap_steps
+                ):  # no architecture adap after arch_adap_steps steps
+                    warm_up = 1
+
+                if w_task_lr_scheduler is not None:
+                    w_task_lr_scheduler.step()
+
+                if a_task_lr_scheduler is not None:
+                    a_task_lr_scheduler.step()
+
+                if self.config.use_tse_darts:
+                    tse_train(
+                        task,
+                        self.model,
+                        self.architect,
+                        self.w_optim,
+                        self.a_optim,
+                        lr,
+                        global_progress,
+                        self.config,
+                        warm_up,
+                    )
+                else:
+                    train(
+                        task,
+                        self.model,
+                        self.architect,
+                        self.w_optim,
+                        self.a_optim,
+                        lr,
+                        global_progress,
+                        self.config,
+                        warm_up,
+                    )
+
+                
+                if (
+                    model_has_normalizer
+                    and train_step < (arch_adap_steps - 1)
+                    and not warm_up
+                ):  # todo check if not warm_up is correct
+                    self.model.normalizer["params"]["curr_step"] += 1
+                    self.architect.v_net.normalizer["params"]["curr_step"] += 1
+        
         w_task = OrderedDict(
             {
                 layer_name: copy.deepcopy(layer_weight)
@@ -298,66 +434,6 @@ class Darts:
         )
 
         return task_info
-
-
-def tse_train(
-    task,
-    model,
-    architect,
-    w_optim,
-    alpha_optim,
-    lr,
-    global_progress,
-    config,
-    warm_up=False,
-):
-    model.train()
-
-    model.zero_grad()
-    model_init = copy.deepcopy(model.state_dict())
-
-    # No unrolling loop for T=100, as this loop would hugely increase
-    # the computational cost in few-shot setting.
-    for unrolling_step in range(config.tse_steps):
-
-        for step, (train_X, train_y) in enumerate(task.train_loader):
-            train_X, train_y = train_X.to(
-                config.device), train_y.to(config.device)
-
-            # Step 1 of Algorithm 3 - do the unrolling over 100 steps to
-            # collect TSE gradient
-            base_loss = model.loss(train_X, train_y)
-            base_loss.backward()
-
-            w_optim.step()  # Train the weights during unrolling as normal,
-            # but the architecture gradients are not zeroed during the unrolling
-            w_optim.zero_grad()
-
-        # Step 2 of Algorithm 3 - update the architecture encoding using
-        # accumulated gradients
-        if not warm_up:
-            alpha_optim.step()
-            alpha_optim.zero_grad()  # Reset to get ready for new unrolling
-
-            # Temporary backup for new architecture encoding
-            new_arch_params = copy.deepcopy(model._alphas)
-
-            # Old weights are loaded, which also reverts the architecture encoding
-            model.load_state_dict(model_init)
-            for(_, p1), (_, p2) in zip(model._alphas, new_arch_params):
-                p1.data = p2.data
-
-            # Step 3 of Algorithm 3 - training weights after updating the
-            # architecture encoding
-            for step, (train_X, train_y) in enumerate(task.train_loader):
-                train_X, train_y = train_X.to(
-                    config.device), train_y.to(config.device)
-                base_loss = model.loss(train_X, train_y)
-                base_loss.backward()
-                w_optim.step()
-
-                w_optim.zero_grad()
-                alpha_optim.zero_grad()
 
 
 def train(

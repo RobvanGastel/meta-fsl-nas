@@ -3,6 +3,8 @@ import torch
 import torch.nn as nn
 from metanas.utils import genotypes as gt
 
+from metanas.utils.utils import beta_decay_scheduler
+
 """ Operations
 Copyright (c) 2021 Robert Bosch GmbH
 
@@ -63,18 +65,40 @@ OPS = {
 }
 
 
-OPS_NAS_BENCH_201 = {
+OPS_SHARPDARTS = {
     'none': lambda C, stride, affine: Zero(stride),
+    'avg_pool_3x3': lambda C, stride, affine: ResizablePool(
+        C, C, 3, stride, 1, affine=affine, pool_type=nn.AvgPool2d),
+    'max_pool_3x3': lambda C, stride, affine: ResizablePool(
+        C, C, 3, stride, 1, affine=affine),
     'skip_connect': lambda C, stride, affine: Identity()
     if stride == 1
     else FactorizedReduce(C, C, affine=affine),
-    'nor_conv_1x1': lambda C, stride, affine: StdConv(
-        C, C, 1, stride, 0, affine=affine),
-    'nor_conv_3x3': lambda C, stride, affine: StdConv(
+    'sep_conv_3x3': lambda C, stride, affine: SharpSepConv(
         C, C, 3, stride, 1, affine=affine),
-    'avg_pool_3x3': lambda C, stride, affine: PoolBN(
-        "avg", C, 3, stride, 1, affine=affine
+    'sep_conv_5x5': lambda C, stride, affine: SharpSepConv(
+        C, C, 5, stride, 2, affine=affine),
+    'flood_conv_3x3': lambda C, stride, affine: SharpSepConv(
+        C, C, 3, stride, 1, affine=affine, C_mid_mult=4),
+    'flood_conv_5x5': lambda C, stride, affine: SharpSepConv(
+        C, C, 5, stride, 2, affine=affine, C_mid_mult=4),
+    'sep_conv_7x7': lambda C, stride, affine: SharpSepConv(
+        C, C, 7, stride, 3, affine=affine),
+    'dil_conv_3x3': lambda C, stride, affine: SharpSepConv(
+        C, C, 3, stride, 2, dilation=2, affine=affine),
+    'dil_conv_5x5': lambda C, stride, affine: SharpSepConv(
+        C, C, 5, stride, 4, dilation=2, affine=affine),
+    'conv_7x1_1x7': lambda C, stride, affine: FacConv(
+        C, C, 7, stride, 3, affine=affine
     ),
+    'dil_flood_conv_3x3': lambda C, stride, affine: SharpSepConv(
+        C, C, 3, stride, 2, dilation=2, affine=affine, C_mid_mult=4),
+    'dil_flood_conv_5x5': lambda C, stride, affine: SharpSepConv(
+        C, C, 5, stride, 2, dilation=2, affine=affine, C_mid_mult=4),
+    'choke_conv_3x3': lambda C, stride, affine: SharpSepConv(
+        C, C, 3, stride, 1, affine=affine, C_mid=32),
+    'dil_choke_conv_3x3': lambda C, stride, affine: SharpSepConv(
+        C, C, 3, stride, 2, dilation=2, affine=affine, C_mid=32),
 }
 
 
@@ -104,6 +128,30 @@ class DropPath_(nn.Module):
         drop_path_(x, self.p, self.training)
 
         return x
+
+class SharpSepConv(nn.Module):
+    def __init__(self, C_in, C_out, kernel_size, stride,
+                 padding=1, dilation=1, affine=True, C_mid_mult=1, C_mid=None):
+        super(SharpSepConv, self).__init__()
+        cmid = int(C_out * C_mid_mult)
+        cmid = C_mid if C_mid else cmid
+        self.op = nn.Sequential(
+            nn.ReLU(inplace=False),
+            nn.Conv2d(C_in, C_in, kernel_size, stride,
+                      padding, dilation, groups=C_in, bias=0),
+            nn.Conv2d(C_in, cmid, kernel_size=1,
+                      padding=0, bias=0),
+            nn.BatchNorm2d(cmid, affine=affine),
+            nn.ReLU(inplace=False),
+            nn.Conv2d(cmid, cmid, kernel_size,
+                      stride=1, padding=(kernel_size-1)//2,
+                      dilation=1, groups=cmid, bias=0),
+            nn.Conv2d(cmid, C_out, kernel_size=1,
+                      padding=0, bias=0),
+            nn.BatchNorm2d(C_out, affine=affine))
+
+    def forward(self, x):
+        return self.op(x)
 
 
 class PoolBN(nn.Module):
@@ -308,8 +356,8 @@ class MixedOp(nn.Module):
         for primitive in PRIMITIVES:
             if primitive_space == "fewshot":
                 op = OPS[primitive](C, stride, affine=False)
-            elif primitive_space == "nasbench201":
-                op = OPS_NAS_BENCH_201[primitive](C, stride, affine=False)
+            elif primitive_space == "sharp":
+                op = OPS_SHARPDARTS[primitive](C, stride, affine=False)
             else:
                 raise RuntimeError("Primitive space is not supported.")
 
@@ -341,3 +389,167 @@ class MixedOp(nn.Module):
                 (1. - max_w + w) * op(x) for w, op in zip(weights, self._ops)
                 if w > alpha_prune_threshold
             )
+
+class MixedOpAuxSkip(nn.Module):
+    """ Mixed operation with DARTS- auxiliary skip-connection"""
+
+    def __init__(self, C, stride, PRIMITIVES, primitive_space,
+                 weight_regularization,
+                 dropout_skip_connections=False):
+        super().__init__()
+        self.weight_regularization = weight_regularization
+        self._ops = nn.ModuleList()
+
+        auxiliary_operation = 'skip' # conv1
+        if stride == 2:
+            self.auxiliary_op = FactorizedReduce(C, C, affine=False)
+        elif auxiliary_operation == 'skip':
+            self.auxiliary_op = Identity()
+        elif auxiliary_operation == 'conv1':
+            self.auxiliary_op = nn.Conv2d(C, C, 1, padding=0, bias=False)
+            # reinitialize with identity to be equivalent as skip
+            eye = torch.eye(C,C)
+            for i in range(C):
+                self.auxiliary_op.weight.data[i,:,0,0] = eye[i]
+        else:
+            assert False, 'Unknown auxiliary operation'
+            
+        for primitive in PRIMITIVES:
+            if primitive_space == "sharp":
+                op = OPS_SHARPDARTS[primitive](C, stride, affine=False)
+            elif primitive_space == "fewshot":
+                op = OPS[primitive](C, stride, affine=False)
+            else:
+                raise RuntimeError("Primitive space is not supported.")
+
+            # Apply level dropout after each skip-connection. To partially
+            # "cut off" the straight path through skip-connections.
+            if not isinstance(op, Identity):
+                op = nn.Sequential(op, DropPath_())
+            elif dropout_skip_connections:
+                op = nn.Sequential(op, nn.Dropout())
+
+            self._ops.append(op)
+
+    def forward(self, x, weights, alpha_prune_threshold=0.0):
+        """
+        Args:
+            x: input
+            weights: weight for each operation
+            alpha_prune_threshold: prune ops during forward pass
+                if alpha below threshold
+        """
+        if self.weight_regularization == "scalar":
+            ops = sum(
+                w * op(x) for w, op in zip(weights, self._ops)
+                if w > alpha_prune_threshold)
+            
+            ops += self.auxiliary_op(x) * beta_decay_scheduler.decay_rate
+            return ops
+
+        elif self.weight_regularization == "max_w":
+            max_w = torch.max(weights)
+            ops = sum(
+                (1. - max_w + w) * op(x) for w, op in zip(weights, self._ops)
+                if w > alpha_prune_threshold
+            )
+
+            ops += self.auxiliary_op(x) * beta_decay_scheduler.decay_rate
+            return ops
+
+
+def channel_shuffle(x, groups):
+    """PC-DARTS channel shuffle"""
+    batchsize, num_channels, height, width = x.data.size()
+
+    channels_per_group = num_channels // groups
+    
+    # reshape
+    x = x.view(batchsize, groups, 
+        channels_per_group, height, width)
+
+    x = torch.transpose(x, 1, 2).contiguous()
+
+    # flatten
+    x = x.view(batchsize, -1, height, width)
+    return x
+
+
+class MixedOpAuxSkipPartial(nn.Module):
+    """ Mixed operation with DARTS- auxiliary skip-connection and PC-DARTS"""
+
+    def __init__(self, C, stride, PRIMITIVES, primitive_space,
+                 weight_regularization,
+                 dropout_skip_connections=False):
+        super().__init__()
+        self.weight_regularization = weight_regularization
+        self._ops = nn.ModuleList()
+        self.mp = nn.MaxPool2d(2,2)
+        self.k = 2
+
+        auxiliary_operation = 'skip'
+        if stride == 2:
+            self.auxiliary_op = FactorizedReduce(C, C, affine=False)
+        elif auxiliary_operation == 'skip':
+            self.auxiliary_op = Identity()
+        elif auxiliary_operation == 'conv1':
+            self.auxiliary_op = nn.Conv2d(C, C, 1, padding=0, bias=False)
+            # reinitialize with identity to be equivalent as skip
+            eye = torch.eye(C,C)
+            for i in range(C):
+                self.auxiliary_op.weight.data[i,:,0,0] = eye[i]
+        else:
+            assert False, 'Unknown auxiliary operation'
+            
+        for primitive in PRIMITIVES:
+            if primitive_space == "sharp":
+                op = OPS_SHARPDARTS[primitive](C//self.k, stride, affine=False)
+            elif primitive_space == "fewshot":
+                op = OPS[primitive](C//self.k, stride, affine=False)
+            else:
+                raise RuntimeError("Primitive space is not supported.")
+
+            # Apply level dropout after each skip-connection. To partially
+            # "cut off" the straight path through skip-connections.
+            if not isinstance(op, Identity):
+                op = nn.Sequential(op, DropPath_())
+            elif dropout_skip_connections:
+                op = nn.Sequential(op, nn.Dropout())
+
+            self._ops.append(op)
+
+    def forward(self, x, weights, alpha_prune_threshold=0.0):
+        """
+        Args:
+            x: input
+            weights: weight for each operation
+            alpha_prune_threshold: prune ops during forward pass
+                if alpha below threshold
+        """
+
+        # PC-DARTS approach
+        dim_2 = x.shape[1]
+        xtemp = x[ : , :  dim_2//self.k, :, :]
+        xtemp2 = x[ : ,  dim_2//self.k:, :, :]
+        
+        if self.weight_regularization == "scalar":
+            ops = sum(
+                w * op(x) for w, op in zip(weights, self._ops)
+                if w > alpha_prune_threshold)
+            
+        elif self.weight_regularization == "max_w":
+            max_w = torch.max(weights)
+            ops = sum(
+                (1. - max_w + w) * op(x) for w, op in zip(weights, self._ops)
+                if w > alpha_prune_threshold
+            )
+        
+        # reduction cell needs pooling before concat
+        if ops.shape[2] == x.shape[2]:
+            ans = torch.cat([ops, xtemp2],dim=1)
+        else:
+            ans = torch.cat([ops, self.mp(xtemp2)], dim=1)
+        ans = channel_shuffle(ans, self.k)
+
+        ans += self.auxiliary_op(x) * beta_decay_scheduler.decay_rate
+        return ans

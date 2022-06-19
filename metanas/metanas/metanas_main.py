@@ -80,8 +80,8 @@ def meta_architecture_search(
     # Primitives
     if config.primitives_type == "fewshot":
         config.primitives = gt.PRIMITIVES_FEWSHOT
-    elif config.primitives_type == "nasbench201":
-        config.primitives = gt.PRIMITIVES_NAS_BENCH_201
+    elif config.primitives_type == "sharp":
+        config.primitives = gt.PRIMITIVES_SHARP
     else:
         raise RuntimeError(
             f"This {config.primitives_type} set is not supported.")
@@ -127,8 +127,11 @@ def meta_architecture_search(
     )
 
     # Meta-RL agent
-    config = utils.set_rl_hyperparameters(config)
-    agent = _init_meta_rl_agent(config, meta_model)
+    if config.use_meta_rl:
+        config = utils.set_rl_hyperparameters(config)
+        agent = _init_meta_rl_agent(config, meta_model)
+    else:
+        agent = None
 
     # load pretrained model
     if config.model_path is not None:
@@ -386,6 +389,8 @@ def _build_model(config, task_distribution, normalizer):
             dropout_skip_connections=True if config.dropout_skip_connections else False,
             use_hierarchical_alphas=config.use_hierarchical_alphas,
             use_pairwise_input_alphas=config.use_pairwise_input_alphas,
+            use_dartsminus=config.use_darts_minus,
+            use_pc_dartsminus=config.use_pc_darts_minus,
             alpha_prune_threshold=config.alpha_prune_threshold,
         )
 
@@ -621,14 +626,15 @@ def train(
         )
 
     # Environment to learn reduction and normal cell
-    env_normal = NasEnv(
-        config, meta_model, test_phase=False, cell_type="normal",
-        max_ep_len=config.env_max_ep_len,
-        disable_pairwise_alphas=config.env_disable_pairwise_alphas)
-    env_reduce = NasEnv(
-        config, meta_model, test_phase=False, cell_type="reduce",
-        max_ep_len=config.env_max_ep_len,
-        disable_pairwise_alphas=config.env_disable_pairwise_alphas)
+    if config.use_meta_rl:
+        env_normal = NasEnv(
+            config, meta_model, test_phase=False, cell_type="normal",
+            max_ep_len=config.env_max_ep_len,
+            disable_pairwise_alphas=config.env_disable_pairwise_alphas)
+        env_reduce = NasEnv(
+            config, meta_model, test_phase=False, cell_type="reduce",
+            max_ep_len=config.env_max_ep_len,
+            disable_pairwise_alphas=config.env_disable_pairwise_alphas)
 
     for meta_epoch in range(config.start_epoch, config.meta_epochs + 1):
 
@@ -657,22 +663,26 @@ def train(
             start = time.time()
 
             # Meta-RL optimization
-            meta_model = meta_rl_optimization(
-                config, task, env_normal, env_reduce, agent,
-                meta_state, meta_model, meta_epoch, test_phase=False)
+            if config.use_meta_rl:
+                meta_model = meta_rl_optimization(
+                    config, task, env_normal, env_reduce, agent,
+                    meta_state, meta_model, meta_epoch, test_phase=False)
 
             task_info = task_optimizer.step(
                 task, epoch=meta_epoch,
                 global_progress=global_progress
             )
 
-            agent.logger.store(TestFinetuneAcc=task_info.top1)
-            agent.logger.store(TestFinetuneLoss=task_info.loss)
-            agent.logger.store(TestFinetuneParam=int(
-                task_info.sparse_num_params//1000))
+            if config.use_meta_rl:
+                agent.logger.store(TestFinetuneAcc=task_info.top1)
+                agent.logger.store(TestFinetuneLoss=task_info.loss)
+                # divide by 1000 to parameters by thousand
+                agent.logger.store(TestFinetuneParam=int(
+                    task_info.sparse_num_params//1000))
 
-            # The number of trials = total epochs / epochs per trial
-            agent.log_trial(start, agent.total_epochs//agent.epochs)
+                # The number of trials = total epochs / epochs per trial
+                agent.log_trial(start, agent.total_epochs//agent.epochs)
+            
             task_infos += [task_info]
 
             meta_model.load_state_dict(meta_state)
@@ -683,9 +693,10 @@ def train(
         train_test_loss.append(config.losses_logger.avg)
         train_test_accu.append(config.top1_logger.avg)
 
-        d = shelve.open(config.action_path)
-        d.update(agent.action_dict)
-        d.close()
+        if config.use_meta_rl and config.agent == "ppo":
+            d = shelve.open(config.action_path)
+            d.update(agent.action_dict)
+            d.close()
 
         # do a meta update
         meta_optimizer.step(task_infos)
@@ -733,9 +744,10 @@ def train(
             for task in meta_test_batch:
 
                 # Meta-RL optimization
-                meta_model = meta_test_rl_optimization(
-                    config, task, env_normal, env_reduce, agent,
-                    meta_state, meta_model, meta_epoch)
+                if config.use_meta_rl:
+                    meta_model = meta_test_rl_optimization(
+                        config, task, env_normal, env_reduce, agent,
+                        meta_state, meta_model, meta_epoch)
 
                 task_info = task_optimizer.step(
                     task,
@@ -747,7 +759,8 @@ def train(
                 task_infos += [task_info]
 
                 # Test logging accuracy and loss
-                agent.log_test_test_accuracy(task_info)
+                if config.use_meta_rl:
+                    agent.log_test_test_accuracy(task_info)
 
                 meta_model.load_state_dict(meta_state)
 
@@ -871,15 +884,16 @@ def evaluate(config, meta_model, task_distribution, task_optimizer, agent):
         alpha_logger = None
 
     # Environment to learn reduction and normal cell
-    env_normal = NasEnv(
-        config, meta_model, test_phase=True, cell_type="normal",
-        max_ep_len=config.env_max_ep_len,
-        disable_pairwise_alphas=config.env_disable_pairwise_alphas)
+    if config.use_meta_rl:
+        env_normal = NasEnv(
+            config, meta_model, test_phase=True, cell_type="normal",
+            max_ep_len=config.env_max_ep_len,
+            disable_pairwise_alphas=config.env_disable_pairwise_alphas)
 
-    env_reduce = NasEnv(
-        config, meta_model, test_phase=True, cell_type="reduce",
-        max_ep_len=config.env_max_ep_len,
-        disable_pairwise_alphas=config.env_disable_pairwise_alphas)
+        env_reduce = NasEnv(
+            config, meta_model, test_phase=True, cell_type="reduce",
+            max_ep_len=config.env_max_ep_len,
+            disable_pairwise_alphas=config.env_disable_pairwise_alphas)
 
     for eval_epoch in range(config.eval_epochs):
 
@@ -890,9 +904,10 @@ def evaluate(config, meta_model, task_distribution, task_optimizer, agent):
         for task in meta_test_batch:
 
             # Meta-RL optimization
-            meta_model = meta_test_rl_optimization(
-                config, task, env_normal, env_reduce, agent,
-                meta_state, meta_model, config.meta_epochs)
+            if config.use_meta_rl:
+                meta_model = meta_test_rl_optimization(
+                    config, task, env_normal, env_reduce, agent,
+                    meta_state, meta_model, config.meta_epochs)
 
             task_infos += [
                 task_optimizer.step(
@@ -1164,8 +1179,23 @@ if __name__ == "__main__":
         help="Whether to use drop path also during meta testing.",
     )
 
-    # P-DARTS, SharpDARTS, TSE-DARTS configurations
+
+    # P-DARTS, SharpDARTS, and TSE-DARTS configurations
+
+    # P-DARTS
     # Enabling both approaches, specificly for ablation study
+    parser.add_argument(
+        "--use_search_space_approximation",
+        action="store_true",
+        help="Whether to enable P-DARTS, search space approximation",
+    )
+
+    parser.add_argument(
+        "--use_search_space_regularization",
+        action="store_true",
+        help="Whether to enable P-DARTS, search space regularization",
+    )
+
     parser.add_argument(
         "--dropout_skip_connections",
         action="store_true",
@@ -1175,24 +1205,36 @@ if __name__ == "__main__":
     parser.add_argument(
         "--use_limit_skip_connections",
         action="store_true",
-        help="Change skip-connections to M in final gene"
+        help="Change skip-connections to M in final gene",
     )
-
+    
     # Discovered cells are allowed to keep M = 2, skip connections.
     parser.add_argument("--limit_skip_connections", type=int, default=2)
 
+    parser.add_argument("--use_reinitialize_model", action="store_true")
+
+
+    # SharpDARTS
     # Regularize the weights based on maximum weight of the alphas
     parser.add_argument("--darts_regularization", default="scalar",
                         help="Either scalar or max_w")
-
+    
     parser.add_argument("--use_cosine_power_annealing", action="store_true")
+
+    # DARTS-
+    parser.add_argument("--use_darts_minus", action="store_true")
+    
+    parser.add_argument("--use_pc_darts_minus", action="store_true")
+
+    # TSE-DARTS
+    parser.add_argument("--tse_steps", type=int, default=1)
 
     parser.add_argument("--use_tse_darts", action="store_true",
                         help="Training Speed Estimation (TSE)")
 
     # Architectures
     parser.add_argument("--primitives_type", default="fewshot",
-                        help="Either fewshot, nasbench201")
+                        help="Either fewshot, sharp")
 
     parser.add_argument("--init_channels", type=int, default=16)
 
@@ -1266,6 +1308,8 @@ if __name__ == "__main__":
     )  # deprecated
 
     # Meta-RL agent settings
+    parser.add_argument("--use_meta_rl", action="store_true")
+
     parser.add_argument("--agent", default="random",
                         help="random / ppo")
 
@@ -1284,9 +1328,7 @@ if __name__ == "__main__":
 
     # Environment settings
     parser.add_argument("--darts_estimation_steps",
-                        type=int, default=7)
-
-    parser.add_argument("--tse_steps", type=int, default=1)
+                        type=int, default=5)
 
     parser.add_argument("--use_env_random_start",
                         action="store_true")
@@ -1304,6 +1346,16 @@ if __name__ == "__main__":
                         action="store_true")
 
     parser.add_argument("--env_disable_pairwise_alphas",
+                        action="store_true")
+
+    # Environment components
+    parser.add_argument("--env_topk_update",
+                        action="store_true")
+    
+    parser.add_argument("--env_alpha_action_masking",
+                        action="store_true")
+
+    parser.add_argument("--env_increase_actions",
                         action="store_true")
     args = parser.parse_args()
 

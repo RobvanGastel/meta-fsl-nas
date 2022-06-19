@@ -54,29 +54,29 @@ class NasEnv(gym.Env):
 
         # Task acuracy estimator
         self.max_task_train_steps = config.darts_estimation_steps
-        else:
-            # DARTS estimation of the network
-            self.task_train_steps = 0
 
-            self.w_optim = torch.optim.Adam(
-                self.meta_model.weights(),
-                lr=self.config.w_lr,
-                betas=(0.0, 0.999),
-                weight_decay=self.config.w_weight_decay,
-            )
+        # DARTS estimation of the network
+        self.task_train_steps = 0
 
-            self.a_optim = torch.optim.Adam(
-                self.meta_model.alphas(),
-                self.config.alpha_lr,
-                betas=(0.0, 0.999),
-                weight_decay=self.config.alpha_weight_decay,
-            )
+        self.w_optim = torch.optim.Adam(
+            self.meta_model.weights(),
+            lr=self.config.w_lr,
+            betas=(0.0, 0.999),
+            weight_decay=self.config.w_weight_decay,
+        )
 
-            self.architect = Architect(
-                self.meta_model,
-                self.config.w_momentum,
-                self.config.w_weight_decay,
-                self.config.use_first_order_darts)
+        self.a_optim = torch.optim.Adam(
+            self.meta_model.alphas(),
+            self.config.alpha_lr,
+            betas=(0.0, 0.999),
+            weight_decay=self.config.alpha_weight_decay,
+        )
+
+        self.architect = Architect(
+            self.meta_model,
+            self.config.w_momentum,
+            self.config.w_weight_decay,
+            self.config.use_first_order_darts)
 
         # Episode step counter
         self.step_count = 0
@@ -96,11 +96,12 @@ class NasEnv(gym.Env):
         self.A_up = np.triu(self.A)
 
         # Initialize action space
-        # TODO
-        # |A| + 2*|O| + 1, +1 if termination action
-        action_size = len(self.A) + len(self.primitives)
-        #2*len(self. primitives)
-        # Remove decrease action
+        # |A| + 2*|O| + 1, 2*|O| in the case of increase and decrease actions
+        if self.config.env_increase_actions:
+            action_size = len(self.A) + len(self.primitives)
+        else:
+            action_size = len(self.A) + 2*len(self.primitives)
+        
         self.action_size = action_size
         self.action_space = spaces.Discrete(action_size)
 
@@ -266,7 +267,6 @@ class NasEnv(gym.Env):
             _, topk_edge_indices = torch.topk(edge_max.view(-1), k=2)
 
             # one-hot edges: Tensor(n_edges, n_ops)
-            # TODO
             edge_one_hot = torch.zeros_like(edges[:, :])
             for hot_e, op in zip(edge_one_hot, edge_idx):
                 hot_e[op.item()] = 1
@@ -275,7 +275,6 @@ class NasEnv(gym.Env):
                 self.discrete_alphas.append(edge.detach().numpy())
                 self.discrete_alphas.append(edge.detach().numpy())
 
-            # TODO
             for j, edge in enumerate(edges[:, :]):
                 # for j, edge in enumerate(edge_one_hot):
                 self.edge_to_index[(j, i+2)] = s_idx
@@ -283,11 +282,6 @@ class NasEnv(gym.Env):
 
                 self.edge_to_alpha[(j, i+2)] = (i, j)
                 self.edge_to_alpha[(i+2, j)] = (i, j)
-
-                # Store to check if edge has changed
-                # TODO
-                # self.discrete_alphas.append(edge.detach().numpy())
-                # self.discrete_alphas.append(edge.detach().numpy())
 
                 # For undirected edge we add the edge twice
                 self.states.append(
@@ -298,9 +292,12 @@ class NasEnv(gym.Env):
                         self.A[i+2],
                         edge.detach().numpy())))
 
-                # TODO, *2
-                self.invalid_mask.append(
-                    np.hstack((self.A[i+2], np.ones((self.n_ops)))))
+                if self.config.env_increase_actions:
+                    self.invalid_mask.append(
+                        np.hstack((self.A[i+2], np.ones((self.n_ops)))))
+                else:
+                    self.invalid_mask.append(
+                        np.hstack((self.A[i+2], np.ones((2*self.n_ops)))))
 
                 self.states.append(
                     np.concatenate((
@@ -310,9 +307,12 @@ class NasEnv(gym.Env):
                         self.A[j],
                         edge.detach().numpy())))
 
-                # TODO
-                self.invalid_mask.append(
-                    np.hstack((self.A[j], np.ones((self.n_ops))))) #*2
+                if self.config.env_increase_actions:
+                    self.invalid_mask.append(
+                        np.hstack((self.A[j], np.ones((self.n_ops)))))
+                else:
+                    self.invalid_mask.append(
+                        np.hstack((self.A[j], np.ones((2*self.n_ops)))))
 
                 s_idx += 2
 
@@ -500,7 +500,10 @@ class NasEnv(gym.Env):
 
         # Invalid action mask
         mask = self.invalid_mask[self.current_state_index]
-        mask += self.alpha_mask
+
+        # Alpha action masking
+        if self.config.env_alpha_action_masking:
+            mask += self.alpha_mask
         self.step_count += 1
 
         info_dict = {
@@ -635,14 +638,16 @@ class NasEnv(gym.Env):
                 # Update the local state after increasing the alphas
                 prev_states = self.update_states()
 
-                # TODO
-                # if self.do_update is False:
-                self.do_update = update
-
+                if self.config.env_topk_update:
                     # Only "Calculate reward/do_update" for reward if
                     # in top-k
-                    # self.do_update = edge_become_topk(
-                    #     prev_states, self.states, self.discrete_alphas, s_idx)
+                    if self.do_update is False:
+                        self.do_update = edge_become_topk(
+                            prev_states, self.states, self.discrete_alphas, s_idx)
+                
+                else:
+                    self.do_update = update
+
 
             # Set current state again!
             self.current_state = self.states[s_idx]
@@ -676,13 +681,14 @@ class NasEnv(gym.Env):
                 # Update the local state after increasing the alphas
                 prev_states = self.update_states()
 
-                # if self.do_update is False:
-                self.do_update = update
-
-                # Only "Calculate reward/do_update" for reward if
-                # in top-k or if the topk edge changed.
-                    # self.do_update = edge_become_topk(
-                    #     prev_states, self.states, self.discrete_alphas, s_idx)
+                if self.config.env_topk_update:
+                    # Only "Calculate reward/do_update" for reward if
+                    # in top-k
+                    if self.do_update is False:
+                        self.do_update = edge_become_topk(
+                            prev_states, self.states, self.discrete_alphas, s_idx)
+                else:
+                    self.do_update = update
 
             # Set current state again!
             self.current_state = self.states[s_idx]
@@ -889,27 +895,6 @@ class NasEnv(gym.Env):
             prec1, _ = utils.accuracy(logits, val_y, topk=(1, 5))
             accs.append(prec1.item())
         return np.mean(accs)
-
-
-
-def parse(alpha, k, primitives=gt.PRIMITIVES_NAS_BENCH_201):
-    gene = []
-    for edges in alpha:
-        edge_max, primitive_indices = torch.topk(
-            edges[:, :], 1
-        )
-
-        topk_edge_values, topk_edge_indices = torch.topk(
-            edge_max.view(-1), k)
-
-        node_gene = []
-        for edge_idx in topk_edge_indices:
-            prim_idx = primitive_indices[edge_idx]
-            prim = primitives[prim_idx]
-            node_gene.append((prim, edge_idx.item()))
-
-        gene.append(node_gene)
-    return gene
 
 
 def edge_become_topk(prev_dict, states, alphas, s_idx):
