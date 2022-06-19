@@ -1,6 +1,5 @@
 
 from torch.utils.data import DataLoader, RandomSampler, TensorDataset
-from metanas.tasks.omniprint import omniprint
 from torchmeta.datasets import Omniglot
 from torchmeta.transforms import Categorical, ClassSplitter, Rotation
 from torchvision.transforms import Compose, Resize, ToTensor, Grayscale
@@ -30,7 +29,7 @@ GNU Affero General Public License for more details.
 
 def sample_meta_batch(
     batch_iter, meta_batch_size, task_batch_size, shots, ways,
-    task_train_sampler=None, seed=None, validation_set=False
+    task_train_sampler=None, seed=None
 ):
     """Sample a meta batch using a torchmeta :class:`BatchMetaDataLoader`
 
@@ -54,7 +53,14 @@ def sample_meta_batch(
 
     meta_train_batch = list()
     for task_idx in range(num_tasks):
+        # Train loader
+        dset_train = TensorDataset(
+            train_batch_x[task_idx], train_batch_y[task_idx])
+        train_loader = DataLoader(
+            dset_train, batch_size=task_batch_size,
+            sampler=task_train_sampler)
 
+<<<<<<< HEAD
         # if validation_set:
         #     # todo 0.8 training set, 0.2 validation set
         #     task_train_sampler = RandomSampler(
@@ -91,6 +97,8 @@ def sample_meta_batch(
             dset_train, batch_size=task_batch_size,
             sampler=task_train_sampler)
 
+=======
+>>>>>>> submission
         val_loader = train_loader
 
         # Test loader
@@ -100,34 +108,6 @@ def sample_meta_batch(
 
         meta_train_batch.append(Task(train_loader, val_loader, test_loader))
     return meta_train_batch
-
-
-def create_omniprint_data_loader(
-    root,
-    meta_split,
-    print_split,
-    k_way,
-    n_shot,
-    n_query,
-    batch_size,
-    num_workers,
-    download=False,
-    seed=None
-):
-    dataset = omniprint(
-        root,
-        n_shot,
-        k_way,
-        print_split=print_split,
-        meta_split=meta_split,
-        test_shots=n_query,
-        download=download,
-        seed=seed,
-    )
-    dataloader = BatchMetaDataLoader(
-        dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True
-    )
-    return dataloader
 
 
 def create_og_data_loader(
@@ -289,9 +269,6 @@ class TorchmetaTaskDistribution(TaskDistribution):
         self.data_path = config.data_path
         self.download = download
 
-        # Addition of possible test set
-        self.use_validation_set = config.use_validation_set
-
         self.k_way = config.k
         self.n_query = config.q  # number of query points (= test points)
         self.n_shot_test = config.n  # shots during meta-testing
@@ -318,8 +295,7 @@ class TorchmetaTaskDistribution(TaskDistribution):
             self.n_shot_train,
             self.k_way,
             self.train_sampler,
-            seed=self.seed,
-            validation_set=self.use_validation_set)
+            seed=self.seed)
 
     def sample_meta_valid(self):
         return sample_meta_batch(
@@ -329,8 +305,7 @@ class TorchmetaTaskDistribution(TaskDistribution):
             self.n_shot_test,
             self.k_way,
             self.val_sampler,
-            seed=self.seed,
-            validation_set=self.use_validation_set
+            seed=self.seed
         )
 
     def sample_meta_test(self):
@@ -341,8 +316,7 @@ class TorchmetaTaskDistribution(TaskDistribution):
             self.n_shot_test,
             self.k_way,
             self.test_sampler,
-            seed=self.seed,
-            validation_set=self.use_validation_set
+            seed=self.seed
         )
 
 
@@ -530,144 +504,6 @@ class TripleMNISTFewShot(TorchmetaTaskDistribution):
             self.num_workers,
             self.download,
             seed=self.seed,
-        )
-        self.test_it = iter(self.test_loader)
-
-        self.train_sampler = None
-        if self.task_batch_size != self.n_shot_train * self.k_way:
-            self.train_sampler = RandomSampler(
-                range(self.n_shot_train * self.k_way),
-                replacement=True,
-                num_samples=self.task_batch_size,
-            )
-
-        self.test_sampler = None
-        if self.task_batch_size_test != self.n_shot_test * self.k_way:
-            self.val_sampler = RandomSampler(
-                range(self.n_shot_test * self.k_way),
-                replacement=True,
-                num_samples=self.task_batch_size_test,
-            )
-            self.test_sampler = RandomSampler(
-                range(self.n_shot_test * self.k_way),
-                replacement=True,
-                num_samples=self.task_batch_size_test,
-            )
-
-
-class OmniPrintFewShot(TorchmetaTaskDistribution):
-    def __init__(self, config, download=False):
-        super().__init__(config, 1, 32, download)
-
-        self.print_split = config.print_split
-        self.train_loader = create_omniprint_data_loader(
-            self.data_path,
-            "train",
-            self.print_split,
-            self.k_way,
-            self.n_shot_train,
-            self.n_query,
-            self.meta_batch_size_train,
-            self.num_workers,
-            self.download,
-            self.seed
-        )
-        self.train_it = iter(self.train_loader)
-
-        self.val_loader = create_omniprint_data_loader(
-            self.data_path,
-            "val",
-            self.print_split,
-            self.k_way,
-            self.n_shot_test,
-            self.n_query,
-            self.meta_batch_size_test,
-            self.num_workers,
-            self.download,
-            self.seed
-        )
-        self.val_it = iter(self.val_loader)
-
-        self.test_loader = create_omniprint_data_loader(
-            self.data_path,
-            "test",
-            self.print_split,
-            self.k_way,
-            self.n_shot_test,
-            self.n_query,
-            self.meta_batch_size_test,
-            self.num_workers,
-            self.download,
-            self.seed
-        )
-        self.test_it = iter(self.test_loader)
-
-        self.train_sampler = None
-        if self.task_batch_size != self.n_shot_train * self.k_way:
-            self.train_sampler = RandomSampler(
-                range(self.n_shot_train * self.k_way),
-                replacement=True,
-                num_samples=self.task_batch_size,
-            )
-
-        self.test_sampler = None
-        if self.task_batch_size_test != self.n_shot_test * self.k_way:
-            self.val_sampler = RandomSampler(
-                range(self.n_shot_test * self.k_way),
-                replacement=True,
-                num_samples=self.task_batch_size_test,
-            )
-            self.test_sampler = RandomSampler(
-                range(self.n_shot_test * self.k_way),
-                replacement=True,
-                num_samples=self.task_batch_size_test,
-            )
-
-
-class OmniPrintDomainAdaptationFewShot(TorchmetaTaskDistribution):
-    def __init__(self, config, download=False, source_domain=None,
-                 target_domain=None):
-        super().__init__(config, 1, 32, download)
-
-        self.train_loader = create_omniprint_data_loader(
-            self.data_path,
-            "train",
-            source_domain,
-            self.k_way,
-            self.n_shot_train,
-            self.n_query,
-            self.meta_batch_size_train,
-            self.num_workers,
-            self.download,
-            self.seed
-        )
-        self.train_it = iter(self.train_loader)
-
-        self.val_loader = create_omniprint_data_loader(
-            self.data_path,
-            "val",
-            target_domain,
-            self.k_way,
-            self.n_shot_test,
-            self.n_query,
-            self.meta_batch_size_test,
-            self.num_workers,
-            self.download,
-            self.seed
-        )
-        self.val_it = iter(self.val_loader)
-
-        self.test_loader = create_omniprint_data_loader(
-            self.data_path,
-            "test",
-            target_domain,
-            self.k_way,
-            self.n_shot_test,
-            self.n_query,
-            self.meta_batch_size_test,
-            self.num_workers,
-            self.download,
-            self.seed
         )
         self.test_it = iter(self.test_loader)
 

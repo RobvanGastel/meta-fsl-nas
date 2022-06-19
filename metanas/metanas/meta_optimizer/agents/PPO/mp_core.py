@@ -4,9 +4,40 @@ import torch.nn as nn
 import numpy as np
 
 from torch.distributions.categorical import Categorical
-from metanas.meta_optimizer.agents.PPO.core import (layer_init,
-                                                    MaskedCategorical)
 
+
+
+def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
+    torch.nn.init.orthogonal_(layer.weight, std)
+    torch.nn.init.constant_(layer.bias, bias_const)
+    return layer
+
+# source, https://boring-guy.sh/posts/masking-rl/
+class MaskedCategorical(Categorical):
+
+    def __init__(self, logits, mask=None):
+        self.mask = mask
+        if mask is None:
+            super(MaskedCategorical, self).__init__(logits=logits)
+        else:
+            self.mask_value = torch.finfo(logits.dtype).min
+            logits.masked_fill_(~self.mask, self.mask_value)
+            super(MaskedCategorical, self).__init__(logits=logits)
+
+    def entropy(self):
+        if self.mask is None:
+            return super().entropy()
+        p_log_p = self.logits * self.probs
+        p_log_p = torch.where(self.mask, p_log_p,
+                              torch.tensor(0.).to(p_log_p.device))
+        return -p_log_p.sum(-1)
+
+    def log_prob(self, action):
+        if self.mask is None:
+            return super().log_prob(action)
+
+        log_prob = super().log_prob(action)
+        return log_prob
 
 class ActorCritic(nn.Module):
     def __init__(self, env, hidden_size, device, sequence_length,

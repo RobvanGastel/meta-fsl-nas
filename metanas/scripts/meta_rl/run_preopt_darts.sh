@@ -1,5 +1,6 @@
 #!/bin/bash
 
+<<<<<<< HEAD:metanas/scripts/omniglot/run_agent_cont_super_darts.sh
 source /home/TUE/20184291/miniconda3/etc/profile.d/conda.sh
 source activate metanas
 
@@ -8,19 +9,28 @@ EPOCHS=50
 EVAL_FREQ=10
 WARM_UP=0
 SEEDS=(2)
+=======
+# Hyperparameters
+EPOCHS=50
+EVAL_FREQ=10
+WARM_UP=0
+SEEDS=(1 2)
+>>>>>>> submission:metanas/scripts/meta_rl/run_preopt_darts.sh
 
 AGENT=ppo
-DATASET_DIR=/home/rob/Git/meta-fsl-nas/data
-DATASET=omniprint
+DATASET_DIR=/home/path/to/data
+DATASET=omniglot
 
 N=1
 K=20
 
-echo "Start run ${AGENT}, variables: epochs = ${EPOCHS}, warm up variables = ${WARM_UP}, seeds = ${SEEDS[@]}, dataset = ${DATASET}"
-
 for SEED in ${SEEDS}
 do
+<<<<<<< HEAD:metanas/scripts/omniglot/run_agent_cont_super_darts.sh
     TRAIN_DIR=/home/rob/Git/meta-fsl-nas/metanas/results/${DATASET}_n${N}_k${K}/${AGENT}/darts_env_cont_super_unif_a/seed_$SEED
+=======
+    TRAIN_DIR=/home/path/to/results/${DATASET}_n${N}_k${K}/${AGENT}/darts_alpha_action_masking_increase_actions/seed_$SEED
+>>>>>>> submission:metanas/scripts/meta_rl/run_preopt_darts.sh
 	mkdir -p $TRAIN_DIR
 
     args=(
@@ -29,7 +39,7 @@ do
         --job_id 0 \
         --path ${TRAIN_DIR} \
         --data_path ${DATASET_DIR} \
-        --dataset $DATASET
+        --dataset $DATASET \
         --hp_setting 'og_metanas' \
         --use_hp_setting 1 \
         --workers 0 \
@@ -37,7 +47,11 @@ do
         --test_adapt_steps 1.0 \
 
         --seed $SEED \
+<<<<<<< HEAD:metanas/scripts/omniglot/run_agent_cont_super_darts.sh
 
+=======
+        
+>>>>>>> submission:metanas/scripts/meta_rl/run_preopt_darts.sh
         # few shot params
         # examples per class
         --n $N \
@@ -45,8 +59,6 @@ do
         --k $K \
         # test examples per class
         --q 1 \
-
-        --print_split meta5 \
 
         --meta_model_prune_threshold 0.01 \
         --alpha_prune_threshold 0.01 \
@@ -75,10 +87,13 @@ do
         --use_first_order_darts \
         --use_torchmeta_loader \
 
-		# Environment DARTS
+        # Pre-optimization architecture search space
+        --use_meta_rl \
+        # Updates alphas and weights
         --use_meta_model \
-		--darts_estimation_steps 5 \
+        --darts_estimation_steps 5 \
         --env_update_weights_and_alphas \
+        # Only optimized in task-learner
         --env_disable_pairwise_alphas \
 
         # Environment
@@ -90,12 +105,22 @@ do
 
         # meta-RL agent
         --agent ${AGENT} \
-        # E-RL2 batch sampling
+        # E-RL2 exploration sampling
         --agent_exploration \
         --agent_hidden_size 256 \
 
         # Use policy masking illegal actions
         --agent_use_mask \
+
+        # Ablation study methods
+        # env_topk_update, change alpha on obtaining topk operation for current edge
+        # --env_topk_update \
+
+        # env_alpha_action_masking, enforce exploration by masking actions on alpha values
+        --env_alpha_action_masking \
+
+        # env_increase_actions, action space only contains increase actions on the alphas
+        --env_increase_actions \
     )
 
     python -u -m metanas.metanas_main "${args[@]}"

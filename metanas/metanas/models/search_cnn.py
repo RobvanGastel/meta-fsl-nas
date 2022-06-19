@@ -90,6 +90,8 @@ class SearchCNNController(nn.Module):
         dropout_skip_connections=False,
         use_hierarchical_alphas=False,  # deprecated
         use_pairwise_input_alphas=False,
+        use_dartsminus=False,
+        use_pc_dartsminus=False,
         alpha_prune_threshold=0.0,
     ):
         super().__init__()
@@ -196,7 +198,9 @@ class SearchCNNController(nn.Module):
             weight_regularization,
             PRIMITIVES=self.primitives,
             feature_scale_rate=feature_scale_rate,
-            dropout_skip_connections=dropout_skip_connections
+            dropout_skip_connections=dropout_skip_connections,
+            use_dartsminus=use_dartsminus,
+            use_pc_dartsminus=use_pc_dartsminus,
         )
 
     def reinit_search_model(self):
@@ -686,7 +690,9 @@ class SearchCNN(nn.Module):
         weight_regularization="scalar",
         PRIMITIVES=None,
         feature_scale_rate=2,
-        dropout_skip_connections=False
+        dropout_skip_connections=False,
+        use_dartsminus=False,
+        use_pc_dartsminus=False,
     ):
         """
         Args:
@@ -733,7 +739,8 @@ class SearchCNN(nn.Module):
 
             cell = SearchCell(
                 n_nodes, C_pp, C_p, C_cur, reduction_p, reduction, PRIMITIVES,
-                primitive_space, weight_regularization, dropout_skip_connections
+                primitive_space, weight_regularization, dropout_skip_connections,
+                use_dartsminus, use_pc_dartsminus
             )
             reduction_p = reduction
             self.cells.append(cell)
@@ -924,7 +931,7 @@ class SearchCell(nn.Module):
 
     def __init__(self, n_nodes, C_pp, C_p, C, reduction_p, reduction,
                  PRIMITIVES, primitive_space, weight_regularization,
-                 dropout_skip_connections):
+                 dropout_skip_connections, use_dartsminus, use_pc_dartsminus):
         """
         Args:
             n_nodes: Number of intermediate n_nodes. The output of the
@@ -960,9 +967,19 @@ class SearchCell(nn.Module):
                 # reduction should be used only for input node
                 stride = 2 if reduction and j < 2 else 1
 
-                op = ops.MixedOp(C, stride, PRIMITIVES, primitive_space,
-                                 weight_regularization,
-                                 dropout_skip_connections=dropout_skip_connections)
+                if use_dartsminus:
+                    op = ops.MixedOpAuxSkip(C, stride, PRIMITIVES, primitive_space,
+                                    weight_regularization,
+                                    dropout_skip_connections=dropout_skip_connections)
+
+                elif use_pc_dartsminus:
+                    op = ops.MixedOpAuxSkipPartial(C, stride, PRIMITIVES, primitive_space,
+                                    weight_regularization,
+                                    dropout_skip_connections=dropout_skip_connections)
+                else:
+                    op = ops.MixedOp(C, stride, PRIMITIVES, primitive_space,
+                                    weight_regularization,
+                                    dropout_skip_connections=dropout_skip_connections)
                 self.dag[i].append(op)
 
     def forward(

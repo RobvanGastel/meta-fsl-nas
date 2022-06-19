@@ -1,26 +1,20 @@
 #!/bin/bash
 
-source /home/TUE/20184291/miniconda3/etc/profile.d/conda.sh
-source activate metanas
-
-# parameters
-EPOCHS=50
-EVAL_FREQ=10
-WARM_UP=0
+# Hyperparameters
+EPOCHS=500
+EVAL_FREQ=100
+WARM_UP=250
 SEEDS=(1 2)
 
-AGENT=ppo
-DATASET_DIR=/home/rob/Git/meta-fsl-nas/data
-DATASET=miniimagenet
+DATASET_DIR=/home/path/to/data
+DATASET=omniglot
 
-N=5
-K=5
-
-echo "Start run ${AGENT}, variables: epochs = ${EPOCHS}, warm up variables = ${WARM_UP}, seeds = ${SEEDS[@]}, dataset = ${DATASET}"
+N=1
+K=20
 
 for SEED in ${SEEDS}
 do
-    TRAIN_DIR=/home/rob/Git/meta-fsl-nas/metanas/results/${DATASET}_n${N}_k${K}/${AGENT}/darts_env_cont_super_topk/seed_$SEED
+    TRAIN_DIR=/home/path/to/results/${DATASET}_n${N}_k${K}/pdarts/full_pdarts/seed_$SEED
 	mkdir -p $TRAIN_DIR
 
     args=(
@@ -29,14 +23,14 @@ do
         --job_id 0 \
         --path ${TRAIN_DIR} \
         --data_path ${DATASET_DIR} \
-        --dataset $DATASET
-        --hp_setting 'in_metanas' \
+        --dataset $DATASET \
+        --hp_setting 'pdarts' \
         --use_hp_setting 1 \
         --workers 0 \
         --gpus 0 \
         --test_adapt_steps 1.0 \
 
-        --seed $SEED
+        --seed $SEED \
         
         # few shot params
         # examples per class
@@ -48,7 +42,6 @@ do
 
         --meta_model_prune_threshold 0.01 \
         --alpha_prune_threshold 0.01 \
-
         # Meta Learning
         --meta_model searchcnn \
         --meta_epochs $EPOCHS \
@@ -61,7 +54,7 @@ do
 
         --normalizer softmax \
         --normalizer_temp_anneal_mode linear \
-        --normalizer_t_min 0.1 \
+        --normalizer_t_min 0.05 \
         --normalizer_t_max 1.0 \
         --drop_path_prob 0.2 \
 
@@ -73,27 +66,20 @@ do
         --use_first_order_darts \
         --use_torchmeta_loader \
 
-		# Environment DARTS
-        --use_meta_model \
-		--darts_estimation_steps 5 \
-        --env_update_weights_and_alphas \
-        --env_disable_pairwise_alphas \
+        # P-DARTS
+        # Adjust flags to enable different splits
+        --use_search_space_approximation \
+        --use_search_space_regularization \
+        --limit_skip_connections 2 \
 
-        # Environment
-        --use_env_random_start \
+        # For limiting and dropout on skip-connections adjust,
+        --dropout_skip_connections \
+        --use_limit_skip_connections \
+        --limit_skip_connections 2 \
 
-        --env_encourage_exploration \
-        --env_min_rew 0.00 \
-        --env_max_rew 1.00 \
-        
-        # meta-RL agent
-        --agent ${AGENT} \
-        # E-RL2 batch sampling
-        --agent_exploration \
-        --agent_hidden_size 256 \
 
-        # Use policy masking illegal actions
-        --agent_use_mask \
+        # Leads to worse performance, we evaluated PDARTS without reinit of weights
+        # --use_reinitialize_model \
     )
 
     python -u -m metanas.metanas_main "${args[@]}"

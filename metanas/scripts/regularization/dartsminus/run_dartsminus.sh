@@ -1,26 +1,20 @@
 #!/bin/bash
 
-source /home/TUE/20184291/miniconda3/etc/profile.d/conda.sh
-source activate metanas
+# Hyperparameters
+EPOCHS=500
+EVAL_FREQ=100
+WARM_UP=250
+SEEDS=(1 2)
 
-# parameters
-EPOCHS=50
-EVAL_FREQ=10
-WARM_UP=0
-SEEDS=(2)
-
-AGENT=ppo
-DATASET_DIR=/home/rob/Git/meta-fsl-nas/data
+DATASET_DIR=/home/path/to/data
 DATASET=omniglot
 
 N=1
 K=20
 
-echo "Start run ${AGENT}, variables: epochs = ${EPOCHS}, warm up variables = ${WARM_UP}, seeds = ${SEEDS[@]}, dataset = ${DATASET}"
-
 for SEED in ${SEEDS}
 do
-    TRAIN_DIR=/home/rob/Git/meta-fsl-nas/metanas/results/${DATASET}_n${N}_k${K}/${AGENT}/darts_env_cont_super_unif_a/seed_$SEED
+    TRAIN_DIR=/home/path/to/results/${DATASET}_n${N}_k${K}/dartsminus/dartsminus/seed_$SEED
 	mkdir -p $TRAIN_DIR
 
     args=(
@@ -29,7 +23,7 @@ do
         --job_id 0 \
         --path ${TRAIN_DIR} \
         --data_path ${DATASET_DIR} \
-        --dataset $DATASET
+        --dataset $DATASET \
         --hp_setting 'og_metanas' \
         --use_hp_setting 1 \
         --workers 0 \
@@ -37,7 +31,7 @@ do
         --test_adapt_steps 1.0 \
 
         --seed $SEED \
-
+        
         # few shot params
         # examples per class
         --n $N \
@@ -48,7 +42,6 @@ do
 
         --meta_model_prune_threshold 0.01 \
         --alpha_prune_threshold 0.01 \
-
         # Meta Learning
         --meta_model searchcnn \
         --meta_epochs $EPOCHS \
@@ -73,27 +66,10 @@ do
         --use_first_order_darts \
         --use_torchmeta_loader \
 
-		# Environment DARTS
-        --use_meta_model \
-		--darts_estimation_steps 5 \
-        --env_update_weights_and_alphas \
-        --env_disable_pairwise_alphas \
-
-        # Environment
-        --use_env_random_start \
-
-        --env_encourage_exploration \
-        --env_min_rew 0.00 \
-        --env_max_rew 1.00 \
-
-        # meta-RL agent
-        --agent ${AGENT} \
-        # E-RL2 batch sampling
-        --agent_exploration \
-        --agent_hidden_size 256 \
-
-        # Use policy masking illegal actions
-        --agent_use_mask \
+        # DARTS-
+        # Adjust flags to enable different splits
+        --use_darts_minus \
+        # --use_pc_darts_minus \
     )
 
     python -u -m metanas.metanas_main "${args[@]}"

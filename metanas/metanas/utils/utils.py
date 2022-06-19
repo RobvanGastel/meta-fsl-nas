@@ -1,4 +1,3 @@
-
 import datetime
 import logging
 import os
@@ -6,6 +5,8 @@ import shutil
 import tempfile
 import numpy as np
 import torch
+import math
+import functools
 
 from metanas.meta_optimizer.agents.utils.run_utils import setup_logger_kwargs
 
@@ -35,28 +36,24 @@ cf. 3rd-party-licenses.txt in root directory.
 def set_hyperparameter(config):
     """Load/set hyperparameter settings based on predefined config"""
 
+    # Default P-DARTS settings
+    # 3 stages as defined in P-DARTS, 5.1.1, keep configuration the same as
+    # DARTS in the initial stage.
+    config.architecture_stages = 3
+
+    # The number of operations preserved on each edge of the super-network are,
+    # 8, 5, and 3 for stage 1, 2 and 3, respectively.
+    # In this case, the third stage will not drop operations.
+    config.drop_number_operations = [3, 2, 0]
+
     # Dropout rate on the skip-connections
+    config.dropout_ops = [0,0, 0.3, 0.6]
     config.dropout_scale_factor = 0.2
 
     # Dropout rate single stage skip-connections
     config.dropout_op = 0.5
 
-    if config.hp_setting == "in_metanas":  # setting for MetaNAS
-        config.task_train_steps = 5
-        config.n_train = 15
-        config.batch_size = 20
-        config.batch_size_test = 5 if config.n == 1 else 15  # reptile paper A1
-        config.meta_batch_size = 10
-        config.w_lr = 0.001
-        config.alpha_lr = 0.001
-        config.w_meta_lr = 1.0
-        config.a_meta_lr = 0.6
-        config.a_meta_anneal = 0
-        config.a_task_anneal = 0
-        config.w_meta_anneal = 0
-        config.w_task_anneal = 0
-
-    elif config.hp_setting == "og_metanas":  # setting for MetaNAS
+    if config.hp_setting == "og_metanas":  # setting for MetaNAS
         config.task_train_steps = 5
         config.n_train = 15
         config.batch_size = 20
@@ -71,7 +68,7 @@ def set_hyperparameter(config):
         config.w_meta_anneal = 0
         config.w_task_anneal = 0
 
-    elif config.hp_setting == "og_tse_metanas":  # setting for MetaNAS
+    elif config.hp_setting == "tse_metanas":  # setting for MetaNAS
         config.task_train_steps = 5
         config.n_train = 15
         config.batch_size = 20
@@ -79,6 +76,22 @@ def set_hyperparameter(config):
         config.meta_batch_size = 10
         config.w_lr = 0.04
         config.alpha_lr = 0.04
+        config.w_meta_lr = 1.0
+        config.a_meta_lr = 0.6
+        config.a_meta_anneal = 0
+        config.a_task_anneal = 0
+        config.w_meta_anneal = 0
+        config.w_task_anneal = 0
+        
+    # Settings for MetaNAS ablation study
+    elif config.hp_setting == "pdarts":
+        config.task_train_steps = 2
+        config.n_train = 15
+        config.batch_size = 20
+        config.batch_size_test = 10
+        config.meta_batch_size = 10
+        config.w_lr = 0.005
+        config.alpha_lr = 0.005
         config.w_meta_lr = 1.0
         config.a_meta_lr = 0.6
         config.a_meta_anneal = 0
@@ -117,22 +130,6 @@ def set_hyperparameter(config):
         config.a_task_anneal = 0
         config.w_meta_anneal = 1
         config.w_task_anneal = 0
-
-    elif config.hp_setting == "test_exp":  # setting for debugging MetaNAS
-        config.task_train_steps = 6
-        config.n_train = 15
-        config.batch_size = 20
-        config.batch_size_test = 10
-        config.meta_batch_size = 1
-        config.w_lr = 0.005
-        config.alpha_lr = 0.005
-        config.w_meta_lr = 1.0
-        config.a_meta_lr = 0.6
-        config.a_meta_anneal = 0
-        config.a_task_anneal = 0
-        config.w_meta_anneal = 0
-        config.w_task_anneal = 0
-
     else:
         raise RuntimeError(f"Unrecognized hp_setting {config.hp_setting}")
 
@@ -408,3 +405,74 @@ def get_genotype_from_model_ckpt(path, model_instance):
     meta_state = torch.load(path)
     model_instance.load_state_dict(meta_state["meta_model"])
     return model_instance.genotype()
+
+
+
+def singleton(cls, *args, **kw):
+    instances = dict()
+    @functools.wraps(cls)
+    def _fun(*clsargs, **clskw):
+        if cls not in instances:
+            instances[cls] = cls(*clsargs, **clskw)
+        return instances[cls]
+    _fun.cls = cls  # make sure cls can be obtained
+    return _fun
+
+@singleton
+class DecayScheduler(object):
+    def __init__(self, base_lr=1.0, last_iter=-1, T_max=50, T_start=0,
+    T_stop=50, decay_type='cosine'):
+        self.base_lr = base_lr
+        self.T_max = T_max
+        self.T_start = T_start
+        self.T_stop = T_stop
+        self.cnt = 0
+        self.decay_type = decay_type
+        self.decay_rate = 1.0
+
+    def step(self, epoch):
+        if epoch >= self.T_start:
+          if self.decay_type == "cosine":
+              self.decay_rate = self.base_lr * (
+                  1 + math.cos(math.pi * epoch / (self.T_max - self.T_start))
+                  ) / 2.0 if epoch <= self.T_stop else self.decay_rate
+          elif self.decay_type == "slow_cosine":
+              self.decay_rate = self.base_lr * math.cos(
+                  (math.pi/2) * epoch / (self.T_max - self.T_start)
+                  ) if epoch <= self.T_stop else self.decay_rate
+          elif self.decay_type == "linear":
+              self.decay_rate = self.base_lr * (
+                  self.T_max - epoch) / (self.T_max - self.T_start
+                  ) if epoch <= self.T_stop else self.decay_rate
+          else:
+              self.decay_rate = self.base_lr
+        else:
+            self.decay_rate = self.base_lr
+
+@singleton
+class DecaySchedulers:
+    def __init__(self):
+        self.train_beta_decay_scheduler = DecayScheduler(
+            base_lr=1.0, 
+                    T_max=6,  
+                    T_start=0,
+                    T_stop=6,
+                    decay_type='linear')
+        
+        self.test_beta_decay_scheduler = DecayScheduler(
+            base_lr=1.0, 
+                    T_max=50,  
+                    T_start=0,
+                    T_stop=50,
+                    decay_type='linear')
+        self.decay_rate = 0.0
+    
+    def step(self, epoch, test_phase):
+        if not test_phase:
+            self.train_beta_decay_scheduler.step(epoch)
+            self.decay_rate = self.train_beta_decay_scheduler.decay_rate
+        elif test_phase:
+            self.test_beta_decay_scheduler.step(epoch)
+            self.decay_rate = self.test_beta_decay_scheduler.decay_rate
+
+beta_decay_scheduler = DecaySchedulers()

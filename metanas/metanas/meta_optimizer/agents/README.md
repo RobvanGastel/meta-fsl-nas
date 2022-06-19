@@ -1,18 +1,12 @@
 # Reinforcement Learning Agents
-The recurrent reinforcement learning agents to find a better initialization for the alpha values of DARTS in metaNAS.
+The recurrent reinforcement learning agents to pre-optimize the architecture search space of DARTS for metaNAS.
 
-# Implemented Agents (WIP)
-All agents employ RL^2 policy and value function networks, which use recurrent networks and take the current observation, last action and last reward as input. All agents are applied to discrete action space. 
+# Implemented Agent
+All agents employ RL^2 policy and value function networks, which use recurrent networks and take the current observation, last action and last reward as input. All agents are applied to discrete action space and illegal action masking.
 
-Current implemented agents,
-- Deep Q-Networks
-- Random Policy
+- Random Policy 
 - Proximal Policy Optimization
-- ~~Discrete-Soft Actor-Critic~~
 
 ## References
-- [Learning to reinforcement learn](https://arxiv.org/abs/1611.05763)
-- [Discrete Soft-Actor Critic (SAC)](https://arxiv.org/abs/1910.07207)
-- [Duelling DDQN](https://arxiv.org/abs/1511.06581)
-- [Deep Recurrent Q-Learning for Partially Observable MDPs](https://arxiv.org/abs/1507.06527)
-- [Proximal Policy Optimization Algorithms](https://arxiv.org/abs/1707.06347)
+- https://github.com/MarcoMeter/recurrent-ppo-truncated-bptt
+- https://github.com/openai/spinningup

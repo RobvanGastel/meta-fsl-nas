@@ -1,8 +1,12 @@
 #!/bin/bash
 
-source /home/TUE/20184291/miniconda3/etc/profile.d/conda.sh
-source activate metanas
+# Hyperparameters
+EPOCHS=500
+EVAL_FREQ=100
+WARM_UP=250
+SEEDS=(1 2)
 
+<<<<<<< HEAD:metanas/scripts/omniglot/run_agent_cont_super_tse_darts.sh
 # parameters
 EPOCHS=50
 EVAL_FREQ=10
@@ -11,16 +15,21 @@ SEEDS=(1)
 
 AGENT=ppo
 DATASET_DIR=/home/rob/Git/meta-fsl-nas/data
+=======
+DATASET_DIR=/home/path/to/data
+>>>>>>> submission:metanas/scripts/regularization/sharpdarts/run_sharpdarts.sh
 DATASET=omniglot
 
 N=1
 K=20
 
-echo "Start run ${AGENT}, variables: epochs = ${EPOCHS}, warm up variables = ${WARM_UP}, seeds = ${SEEDS[@]}, dataset = ${DATASET}"
-
 for SEED in ${SEEDS}
 do
+<<<<<<< HEAD:metanas/scripts/omniglot/run_agent_cont_super_tse_darts.sh
     TRAIN_DIR=/home/rob/Git/meta-fsl-nas/metanas/results/${DATASET}_n${N}_k${K}/${AGENT}/darts_env_cont_super_unif_a_high_prob_topk_2/seed_$SEED
+=======
+    TRAIN_DIR=/home/path/to/results/${DATASET}_n${N}_k${K}/sharpdarts/full_sharpdarts/seed_$SEED
+>>>>>>> submission:metanas/scripts/regularization/sharpdarts/run_sharpdarts.sh
 	mkdir -p $TRAIN_DIR
 
     args=(
@@ -29,15 +38,22 @@ do
         --job_id 0 \
         --path ${TRAIN_DIR} \
         --data_path ${DATASET_DIR} \
+<<<<<<< HEAD:metanas/scripts/omniglot/run_agent_cont_super_tse_darts.sh
         --dataset $DATASET
+=======
+        --dataset $DATASET \
+>>>>>>> submission:metanas/scripts/regularization/sharpdarts/run_sharpdarts.sh
         --hp_setting 'og_metanas' \
         --use_hp_setting 1 \
         --workers 0 \
         --gpus 0 \
         --test_adapt_steps 1.0 \
 
+<<<<<<< HEAD:metanas/scripts/omniglot/run_agent_cont_super_tse_darts.sh
 
         # --model_path '/home/rob/Git/meta-fsl-nas/metanas/results/omniglot_n1_k20/ppo/darts_env_cont_super_meta_a/seed_1/meta_state' \
+=======
+>>>>>>> submission:metanas/scripts/regularization/sharpdarts/run_sharpdarts.sh
         --seed $SEED \
         
         # few shot params
@@ -50,7 +66,6 @@ do
 
         --meta_model_prune_threshold 0.01 \
         --alpha_prune_threshold 0.01 \
-
         # Meta Learning
         --meta_model searchcnn \
         --meta_epochs $EPOCHS \
@@ -75,6 +90,7 @@ do
         --use_first_order_darts \
         --use_torchmeta_loader \
 
+<<<<<<< HEAD:metanas/scripts/omniglot/run_agent_cont_super_tse_darts.sh
 
 		# Environment DARTS
         --use_meta_model \
@@ -113,6 +129,13 @@ do
 
         # Use policy masking illegal actions
         --agent_use_mask \
+=======
+        # SharpDARTS
+        # Adjust flags to enable different splits
+        --darts_regularization max_w \
+        --use_cosine_power_annealing \
+        --primitives_type sharp \
+>>>>>>> submission:metanas/scripts/regularization/sharpdarts/run_sharpdarts.sh
     )
 
     python -u -m metanas.metanas_main "${args[@]}"

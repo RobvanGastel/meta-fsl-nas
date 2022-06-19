@@ -127,16 +127,6 @@ PRIMITIVES_FEWSHOT = [
     # "none",  # remove
 ]
 
-
-PRIMITIVES_NAS_BENCH_201 = [
-    'none',
-    'skip_connect',
-    'nor_conv_1x1',
-    'nor_conv_3x3',
-    'avg_pool_3x3'
-]
-
-
 PRIMITIVES_SHARP = [
     "avg_pool_3x3",
     "max_pool_3x3",
