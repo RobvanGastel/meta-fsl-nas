@@ -1,6 +1,5 @@
 # Ignore data folders
 data/
-results/
 
 # vscode
 .vscode/
