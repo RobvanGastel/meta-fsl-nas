@@ -1,8 +1,10 @@
 # Regularized Meta-Learning for Neural Architecture Search
-> _Rob van Gastel, Joaquin Vanschoren_
+> _Rob van Gastel, Joaquin Vanschoren_\
 > Neural architecture search (NAS) methods have successfully enabled the automated search of neural architectures in various domains. However, most techniques start from scratch with every new task. Techniques have been proposed that generalize across tasks, but don't always adapt well to new tasks. In this work, we consider meta-learning approaches that effectively leverage prior experience to adapt to unseen tasks. We analyze different regularization and training methods to improve the generalizability of meta-learning for NAS. Empirical results on standard few-shot classification benchmarks show that the added regularization and adjustments in the network optimization improve upon previous approaches, such as MetaNAS. Moreover, our results show that learned reinforcement learning policies help find smaller task-specific architectures.
 
 The code accompanying the paper is based on the implementation of [MetaNAS](https://github.com/boschresearch/metanas), [SpinningUp](https://github.com/openai/spinningup), and [recurrent PPO](https://github.com/MarcoMeter/recurrent-ppo-truncated-bptt). For the regularization methods, the following repositories are used, [SharpDARTS](https://github.com/ahundt/sharpDARTS), [P-DARTS](https://github.com/chenxin061/pdarts), [DARTS-](https://github.com/Meituan-AutoML/DARTS-) and [PC-DARTS](https://github.com/yuhuixu1993/PC-DARTS).
+
+The results from the paper are located in the `results` branch in the `metanas/results` directory. To seperate the large results directory from the code base.
 
 ## Requirements
 Install the required packages by running, 
