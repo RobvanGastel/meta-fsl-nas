@@ -681,16 +681,6 @@ class NasEnv(gym.Env):
                 # Update the local state after increasing the alphas
                 prev_states = self.update_states()
 
-<<<<<<< HEAD
-                # TODO
-                if self.do_update is False:
-                    # self.do_update = update
-
-                    # Only "Calculate reward/do_update" for reward if
-                    # in top-k or if the topk edge changed.
-                    self.do_update = edge_become_topk(
-                        prev_states, self.states, self.discrete_alphas, s_idx)
-=======
                 if self.config.env_topk_update:
                     # Only "Calculate reward/do_update" for reward if
                     # in top-k
@@ -699,7 +689,6 @@ class NasEnv(gym.Env):
                             prev_states, self.states, self.discrete_alphas, s_idx)
                 else:
                     self.do_update = update
->>>>>>> submission
 
             # Set current state again!
             self.current_state = self.states[s_idx]
@@ -723,17 +712,7 @@ class NasEnv(gym.Env):
         if self.config.update_weights_and_alphas:
             acc = self._darts_weight_alpha_estimation(self.current_task)
         else:
-<<<<<<< HEAD
-            if self.config.update_weights_and_alphas:
-                acc = self._darts_weight_alpha_estimation(self.current_task)
-            # elif self.config.use_tse_darts:
-            #     acc = self._tse_darts_weight_alpha_estimation(
-            #         self.current_task)
-            else:
-                acc = self._darts_weight_estimation(self.current_task)
-=======
             acc = self._darts_weight_estimation(self.current_task)
->>>>>>> submission
 
         # Scale reward to (min_rew, max_rew) range, [-min, max]
         reward = self.scale_postive(acc)

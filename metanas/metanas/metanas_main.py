@@ -234,13 +234,6 @@ def meta_test_rl_optimization(
         config, task, env_normal, env_reduce, agent,
         meta_state, meta_model, meta_epoch):
 
-<<<<<<< HEAD
-    # TODO
-    meta_model.reset_alphas(cell="normal")
-    meta_model.reset_alphas(cell="reduce")
-
-=======
->>>>>>> submission
     if not config.use_meta_model:
         # Only update the alphas, not weights
         # Normal cell environment
@@ -290,13 +283,6 @@ def meta_rl_optimization(
         config, task, env_normal, env_reduce, agent,
         meta_state, meta_model, meta_epoch, test_phase=False):
 
-<<<<<<< HEAD
-    # TODO:
-    meta_model.reset_alphas(cell="normal")
-    meta_model.reset_alphas(cell="reduce")
-
-=======
->>>>>>> submission
     if not config.use_meta_model:
         # NORMAL cell environment
         env_normal.set_task(task, meta_state, test_phase)
@@ -707,11 +693,7 @@ def train(
         train_test_loss.append(config.losses_logger.avg)
         train_test_accu.append(config.top1_logger.avg)
 
-<<<<<<< HEAD
-        if config.agent == "ppo":
-=======
         if config.use_meta_rl and config.agent == "ppo":
->>>>>>> submission
             d = shelve.open(config.action_path)
             d.update(agent.action_dict)
             d.close()

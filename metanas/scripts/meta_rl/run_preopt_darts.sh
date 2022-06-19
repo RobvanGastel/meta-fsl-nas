@@ -1,21 +1,10 @@
 #!/bin/bash
 
-<<<<<<< HEAD:metanas/scripts/omniglot/run_agent_cont_super_darts.sh
-source /home/TUE/20184291/miniconda3/etc/profile.d/conda.sh
-source activate metanas
-
-# parameters
-EPOCHS=50
-EVAL_FREQ=10
-WARM_UP=0
-SEEDS=(2)
-=======
 # Hyperparameters
 EPOCHS=50
 EVAL_FREQ=10
 WARM_UP=0
 SEEDS=(1 2)
->>>>>>> submission:metanas/scripts/meta_rl/run_preopt_darts.sh
 
 AGENT=ppo
 DATASET_DIR=/home/path/to/data
@@ -26,11 +15,7 @@ K=20
 
 for SEED in ${SEEDS}
 do
-<<<<<<< HEAD:metanas/scripts/omniglot/run_agent_cont_super_darts.sh
-    TRAIN_DIR=/home/rob/Git/meta-fsl-nas/metanas/results/${DATASET}_n${N}_k${K}/${AGENT}/darts_env_cont_super_unif_a/seed_$SEED
-=======
     TRAIN_DIR=/home/path/to/results/${DATASET}_n${N}_k${K}/${AGENT}/darts_alpha_action_masking_increase_actions/seed_$SEED
->>>>>>> submission:metanas/scripts/meta_rl/run_preopt_darts.sh
 	mkdir -p $TRAIN_DIR
 
     args=(
@@ -47,11 +32,7 @@ do
         --test_adapt_steps 1.0 \
 
         --seed $SEED \
-<<<<<<< HEAD:metanas/scripts/omniglot/run_agent_cont_super_darts.sh
-
-=======
         
->>>>>>> submission:metanas/scripts/meta_rl/run_preopt_darts.sh
         # few shot params
         # examples per class
         --n $N \
@@ -102,7 +83,7 @@ do
         --env_encourage_exploration \
         --env_min_rew 0.00 \
         --env_max_rew 1.00 \
-
+        
         # meta-RL agent
         --agent ${AGENT} \
         # E-RL2 exploration sampling

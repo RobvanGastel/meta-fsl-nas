@@ -84,20 +84,14 @@ class PPO(RL_agent):
 
         # Load existing model
         if model_path['model'] and model_path['vars']:
-            meta_state = torch.load(
-                r'/home/rob/Git/meta-fsl-nas/metanas/results/omniglot_n1_k20/ppo/darts_env_cont_super_meta_a/seed_1/_s1/pyt_save/model50.pt')
+            meta_state = torch.load(model_path['model'])
             self.ac.load_state_dict(meta_state['ac'].state_dict())
             self.optimizer.load_state_dict(meta_state['opt'].state_dict())
 
-            # with open(
-            #         r'/home/rob/Git/meta-fsl-nas/metanas/results/omniglot_n1_k20/ppo/darts_env_cont_super_meta_a/seed_1/_s1/vars50.pkl', 'r') as f:
-            #     print(f.read())
-            #     vars_dict = pickle.load(f)
-            self.total_episodes = 12000  # vars_dict['episodes']
-            self.total_test_episodes = 1200  # vars_dict['test_episodes']
-            self.total_epochs = 300  # vars_dict['epoch']
-            print("preloaded model:", self.total_episodes,
-                  self.total_test_episodes, self.total_epochs)
+            vars_dict = pickle.load(open(model_path['vars'], 'r'))
+            self.total_episodes = vars_dict['episodes']
+            self.total_test_episodes = vars_dict['test_episodes']
+            self.total_epochs = vars_dict['epoch']
 
             # Set up model saving
         self.logger.setup_pytorch_saver({'ac': self.ac, 'opt': self.optimizer})
