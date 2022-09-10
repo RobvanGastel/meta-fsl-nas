@@ -1,0 +1,2 @@
+# Rapid Neural Architecture Search by Learning to Generate Graphs from Datasets (WIP)
+The predictor is taken from the official implementation of the paper and used as performance predictor for the reinforcement learning environment. 

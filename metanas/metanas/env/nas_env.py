@@ -17,6 +17,7 @@ from metanas.utils import utils
 
 import metanas.utils.genotypes as gt
 from metanas.task_optimizer.darts import Architect
+from metanas.meta_predictor.meta_predictor import MetaPredictor
 
 
 """Wrapper for the RL agent to interact with the meta-model in the outer-loop
@@ -51,6 +52,18 @@ class NasEnv(gym.Env):
         # Store reward previous estimation
         self.baseline_acc = 0.0
         self.max_acc = 0.0
+
+        # Task acuracy estimator
+        # TODO: Add reward estimation initialization
+        # self.reward_estimation = reward_estimation
+        # self.max_task_train_steps = config.darts_estimation_steps
+        # if self.reward_estimation:
+        #     self.meta_predictor = MetaPredictor(config)
+
+        #     # remove last fully-connected layer
+        #     model = models.resnet18(pretrained=True).eval().to(config.device)
+        #     self.feature_extractor = torch.nn.Sequential(
+        #         *list(model.children())[:-1])
 
         # Task acuracy estimator
         self.max_task_train_steps = config.darts_estimation_steps
@@ -101,7 +114,7 @@ class NasEnv(gym.Env):
             action_size = len(self.A) + len(self.primitives)
         else:
             action_size = len(self.A) + 2*len(self.primitives)
-        
+
         self.action_size = action_size
         self.action_space = spaces.Discrete(action_size)
 
@@ -618,7 +631,7 @@ class NasEnv(gym.Env):
         # Increasing the alpha for the given operation
         if action in np.arange(len(self.A),
                                len(self.A)+len(self.primitives)):
-        
+
             self.alpha_mask[action] = 1
 
             # Adjust action indices to fit the operations
@@ -644,10 +657,9 @@ class NasEnv(gym.Env):
                     if self.do_update is False:
                         self.do_update = edge_become_topk(
                             prev_states, self.states, self.discrete_alphas, s_idx)
-                
+
                 else:
                     self.do_update = update
-
 
             # Set current state again!
             self.current_state = self.states[s_idx]
@@ -661,7 +673,7 @@ class NasEnv(gym.Env):
         # Decreasing the alpha for the given operation
         if action in np.arange(len(self.A)+len(self.primitives),
                                len(self.A)+2*len(self.primitives)):
-            
+
             self.alpha_mask[action] = 1
 
             # Adjust action indices to fit the operations
@@ -713,6 +725,8 @@ class NasEnv(gym.Env):
             acc = self._darts_weight_alpha_estimation(self.current_task)
         else:
             acc = self._darts_weight_estimation(self.current_task)
+
+        # TODO: Add MetaD2A reward estimation option
 
         # Scale reward to (min_rew, max_rew) range, [-min, max]
         reward = self.scale_postive(acc)
@@ -895,6 +909,151 @@ class NasEnv(gym.Env):
             prec1, _ = utils.accuracy(logits, val_y, topk=(1, 5))
             accs.append(prec1.item())
         return np.mean(accs)
+
+    def _meta_predictor_estimation(self, task):
+        # Encode graph and dataset
+        graph = self._meta_predictor_graph_preprocess()
+        dataset = self._meta_predictor_dataset_preprocess(task)
+
+        # Evaluate on the MetaD2A predictor
+        y_pred = self.meta_predictor.evaluate_architecture(
+            dataset, graph
+        )
+
+        y_pred = y_pred.item()
+        return y_pred
+
+    def _meta_predictor_graph_preprocess(self):
+        geno = parse(self.normalized_alphas, k=2,
+                     primitives=gt.PRIMITIVES_NAS_BENCH_201)
+
+        # Convert genotype to graph
+        edges = []
+
+        # All networks have transformed edge => node,
+        # node => edge the adjacency matrix is,
+        connections = [[1],
+                       [1, 0],
+                       [0, 1, 0],
+                       [1, 0, 0, 0],
+                       [0, 1, 0, 0, 0],
+                       [0, 0, 1, 1, 0, 0],
+                       [0, 0, 0, 0, 1, 1, 1]]
+
+        start_node = [0]
+        edges.append(start_node)
+        index = 0
+
+        for node in geno:
+            for op, _ in node:
+                # plus two, to not confuse the
+                # start node and end node
+                op = [self.primitives.index(op) + 2]
+                op.extend(connections[index])
+                edges.append(op)
+                index += 1
+
+        stop_node = [1]
+        stop_node.extend(connections[-1])
+        edges.append(stop_node)
+
+        graph, _ = decode_metad2a_to_igraph(edges)
+        return graph
+
+    def _meta_predictor_dataset_preprocess(self, task):
+
+        # Get num_samples, n_train * k
+        # Testing dataset does not have enough samples
+        train_X, _ = next(iter(task.train_loader))
+
+        # Shape the image as (3, 32, 32)
+        train_X = train_X.to(self.config.device)
+        dataset = F.interpolate(train_X, size=(32, 32))
+        dataset = fill_up_dataset(dataset, self.config.num_samples)
+
+        assert dataset.shape[0] == self.config.num_samples, \
+            "Number of samples should equal training of meta_predictor " \
+            f"{dataset.shape[0]}, {self.config.num_samples}"
+
+        # Make sure there are 3 channels
+        if self.config.dataset == "omniglot" or \
+                self.config.dataset == "triplemnist":
+            dataset = dataset.repeat(1, 3, 1, 1)
+
+        # Normalize the features
+        if self.config.dataset == "omniglot":
+            mean = torch.tensor([0.9221]).to(self.config.device)
+            std = torch.tensor([0.1257]).to(self.config.device)
+
+        elif self.config.dataset == "triplemnist":
+            mean = torch.tensor([0.0439]).to(self.config.device)
+            std = torch.tensor([0.1879]).to(self.config.device)
+
+        elif self.config.dataset == "miniimagenet":
+            mean = torch.tensor([0.4416]).to(self.config.device)
+            std = torch.tensor([0.2328]).to(self.config.device)
+
+        else:
+            raise RuntimeError(
+                f"Dataset {self.config.dataset} is not supported.")
+        dataset = dataset.sub_(mean).div_(std)
+
+        # Extracts features by ResNet18
+        return self.feature_extractor(dataset)
+
+
+def fill_up_dataset(dataset, required_size):
+    """Enforce similar dataset shapes"""
+    ds_size = dataset.shape[0]
+    ds = copy.deepcopy(dataset)
+
+    # In case only downsizing is required
+    if ds_size >= required_size:
+        return dataset[:required_size]
+
+    while ds.size(0) < required_size:
+        perm = torch.randperm(len(ds))[:1].item()
+        ds = torch.cat((ds, ds[perm].unsqueeze(dim=0)))
+    return ds
+
+
+def decode_metad2a_to_igraph(row):
+    if isinstance(row, str):
+        row = eval(row)
+    n = len(row)
+
+    g = igraph.Graph(directed=True)
+    g.add_vertices(n)
+
+    for i, node in enumerate(row):
+        g.vs[i]['type'] = node[0]
+
+        if i < (n - 2) and i > 0:
+            g.add_edge(i, i + 1)  # always connect from last node
+        for j, edge in enumerate(node[1:]):
+            if edge == 1:
+                g.add_edge(j, i)
+    return g, n
+
+
+def parse(alpha, k, primitives=gt.PRIMITIVES_NAS_BENCH_201):
+    gene = []
+    for edges in alpha:
+        edge_max, primitive_indices = torch.topk(
+            edges[:, :], 1
+        )
+
+        topk_edge_values, topk_edge_indices = torch.topk(
+            edge_max.view(-1), k)
+
+        node_gene = []
+        for edge_idx in topk_edge_indices:
+            prim_idx = primitive_indices[edge_idx]
+            prim = primitives[prim_idx]
+            node_gene.append((prim, edge_idx.item()))
+
+        gene.append(node_gene)
+    return gene
 
 
 def edge_become_topk(prev_dict, states, alphas, s_idx):
