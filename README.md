@@ -35,13 +35,12 @@ Please refer to the [`metanas/scripts`](metanas/scripts/) folder for examples ho
 For the generated graph in the report we refer to the notebook in `metanas/notebook`.
 
 
-<!-- ## Citation
-If you use any part of this code in your research, please cite our [paper]():
+ ## Citation
+If you use any part of this code in your research, please cite our paper:
 ```
-@article{,
-  title={,
-  author={},
-  journal={},
-  year={}
+@misc{robvangastel2021_reg_metanas,
+  title={Regularized Meta-Learning for Neural Architecture Search},
+  author={Rob van Gastel and Joaquin Vanschoren},
+  year={2021},
+  url = {https://automl.cc/wp-content/uploads/2022/07/regularized_meta_learning_for_.pdf},
 }
-``` -->
