@@ -15,11 +15,11 @@ conda activate reg_metanas
 to create and activate the the reg_metanas environment.
 
 
-## Download the datasets
+## Download the Datasets
 Using the Omniglot, TripleMNIST or MiniImageNet dataset by setting `download=True` for the data loaders of `torchmeta_loader.py` provided by [Torchmeta](https://github.com/tristandeleu/pytorch-meta).
 
 
-## How to Use
+## Setup
 #### Explain different experiments run
 Please refer to the [`metanas/scripts`](metanas/scripts/) folder for examples how to use this code. For every method an adjustable bash script is provided, 
 
@@ -31,7 +31,7 @@ Please refer to the [`metanas/scripts`](metanas/scripts/) folder for examples ho
     - Running meta-training for MetaNAS with SharpDARTS is provided in [`run_sharpdarts.sh`](metanas/scripts/regularization/sharpdarts/run_sharpdarts.sh)
 
 
-## Explain graph from notebooks
+## Graphs
 For the generated graph in the report we refer to the notebook in `metanas/notebook`.
 
 
