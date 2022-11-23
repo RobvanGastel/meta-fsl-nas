@@ -1,4 +1,4 @@
-# [Regularized Meta-Learning for Neural Architecture Search](https://automl.cc/wp-content/uploads/2022/07/regularized_meta_learning_for_.pdf)
+# Regularized Meta-Learning for Neural Architecture Search
 > _Rob van Gastel, Joaquin Vanschoren_\
 > Neural architecture search (NAS) methods have successfully enabled the automated search of neural architectures in various domains. However, most techniques start from scratch with every new task. Techniques have been proposed that generalize across tasks, but don't always adapt well to new tasks. In this work, we consider meta-learning approaches that effectively leverage prior experience to adapt to unseen tasks. We analyze different regularization and training methods to improve the generalizability of meta-learning for NAS. Empirical results on standard few-shot classification benchmarks show that the added regularization and adjustments in the network optimization improve upon previous approaches, such as MetaNAS. Moreover, our results show that learned reinforcement learning policies help find smaller task-specific architectures.
 
@@ -41,6 +41,6 @@ If you use any part of this code in your research, please cite our paper:
 @misc{robvangastel2021_reg_metanas,
   title={Regularized Meta-Learning for Neural Architecture Search},
   author={Rob van Gastel and Joaquin Vanschoren},
-  year={2021},
-  url = {https://automl.cc/wp-content/uploads/2022/07/regularized_meta_learning_for_.pdf},
+  year={2022},
+  url = {https://2022.automl.cc/wp-content/uploads/2022/07/regularized_meta_learning_for_.pdf},
 }
